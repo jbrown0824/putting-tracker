@@ -10,13 +10,15 @@
     @else
         <div class="mt-3 grid grid-cols-3 gap-2">
             @foreach ([
-                ['Putts', $progress['total'].' / '.$progress['target_total']],
-                ['Outside', $progress['outside'].' / '.$progress['target_outside_min']],
-                ['Make rate', $progress['make_percent'].'%'],
-            ] as [$label, $value])
+                ['Putts', $progress['total'], '/ '.$progress['target_total']],
+                ['Outside', $progress['outside'], '/ '.$progress['target_outside_min']],
+                ['Make rate', $progress['make_percent'].'%', null],
+            ] as [$label, $value, $suffix])
                 <div class="rounded-lg bg-slate-900 p-3">
                     <div class="text-[11px] text-slate-500">{{ $label }}</div>
-                    <div class="mt-0.5 text-base font-medium">{{ $value }}</div>
+                    <div class="mt-0.5 whitespace-nowrap text-base font-medium">
+                        {{ $value }}@if ($suffix)<span class="text-[11px] font-normal text-slate-500"> {{ $suffix }}</span>@endif
+                    </div>
                 </div>
             @endforeach
         </div>
