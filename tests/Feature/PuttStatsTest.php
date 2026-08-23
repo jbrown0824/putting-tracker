@@ -1,0 +1,170 @@
+<?php
+
+use App\Enums\PuttContext;
+use App\Enums\PuttResult;
+use App\Models\Challenge;
+use App\Models\Putt;
+use App\Models\PuttingSession;
+use App\Services\PuttStats;
+use Illuminate\Support\Carbon;
+
+function logPutts(int $count, PuttResult $result, int $distance, PuttContext $context = PuttContext::Inside): void
+{
+    $session = PuttingSession::factory()->create(['context' => $context]);
+
+    Putt::factory()->count($count)->create([
+        'putting_session_id' => $session->id,
+        'result' => $result,
+        'distance_ft' => $distance,
+        'context' => $context,
+        'hit_at' => Carbon::now(),
+    ]);
+}
+
+it('reports progress and the pace needed to finish', function () {
+    Carbon::setTestNow('2026-08-23 12:00:00');
+
+    $challenge = Challenge::factory()->create([
+        'start_date' => '2026-08-23',
+        'end_date' => '2026-09-19',
+        'target_total' => 2000,
+        'target_outside_min' => 400,
+    ]);
+
+    logPutts(60, PuttResult::Sunk, 5);
+    logPutts(40, PuttResult::MissShort, 5, PuttContext::Outside);
+
+    $progress = app(PuttStats::class)->progress($challenge);
+
+    expect($progress['total'])->toBe(100)
+        ->and($progress['outside'])->toBe(40)
+        ->and($progress['inside'])->toBe(60)
+        ->and($progress['sunk'])->toBe(60)
+        ->and($progress['make_percent'])->toBe(60.0)
+        ->and($progress['remaining'])->toBe(1900)
+        ->and($progress['days_remaining'])->toBe(28)
+        ->and($progress['per_day_needed'])->toBe(68);
+
+    Carbon::setTestNow();
+});
+
+it('counts 28 days for the challenge window', function () {
+    $challenge = Challenge::factory()->create([
+        'start_date' => '2026-08-23',
+        'end_date' => '2026-09-19',
+    ]);
+
+    expect($challenge->totalDays())->toBe(28);
+});
+
+it('splits misses into speed and line errors', function () {
+    logPutts(30, PuttResult::MissShort, 10);
+    logPutts(10, PuttResult::MissLong, 10);
+    logPutts(10, PuttResult::MissLeft, 10);
+    logPutts(10, PuttResult::MissRight, 10);
+    logPutts(5, PuttResult::LipOut, 10);
+    logPutts(20, PuttResult::Sunk, 10);
+
+    $split = app(PuttStats::class)->speedVsLine();
+
+    expect($split['speed'])->toBe(40)
+        ->and($split['line'])->toBe(20)
+        ->and($split['lip_out'])->toBe(5)
+        ->and($split['speed_percent'])->toBe(66.7);
+});
+
+it('builds the miss dial as shares of all putts', function () {
+    logPutts(50, PuttResult::Sunk, 5);
+    logPutts(50, PuttResult::MissShort, 5);
+
+    $dial = app(PuttStats::class)->missDial();
+
+    expect($dial['sunk']['percent'])->toBe(50.0)
+        ->and($dial['miss_short']['percent'])->toBe(50.0)
+        ->and($dial['miss_long']['count'])->toBe(0);
+});
+
+it('reports make rate and speed bias per distance', function () {
+    logPutts(8, PuttResult::Sunk, 5);
+    logPutts(2, PuttResult::MissShort, 5);
+    logPutts(2, PuttResult::Sunk, 20);
+    logPutts(8, PuttResult::MissShort, 20);
+
+    $rows = app(PuttStats::class)->byDistance()->keyBy('distance_ft');
+
+    expect($rows[5]['make_percent'])->toBe(80.0)
+        ->and($rows[20]['make_percent'])->toBe(20.0)
+        ->and($rows[20]['short'])->toBe(8)
+        ->and($rows[20]['speed_bias'])->toBe(-100.0);
+});
+
+it('interpolates the distance where make rate crosses fifty percent', function () {
+    logPutts(8, PuttResult::Sunk, 10);
+    logPutts(2, PuttResult::MissShort, 10);
+    logPutts(2, PuttResult::Sunk, 20);
+    logPutts(8, PuttResult::MissShort, 20);
+
+    expect(app(PuttStats::class)->fiftyPercentDistance())->toBe(15.0);
+});
+
+it('returns null for the fifty percent distance without data on both sides', function () {
+    logPutts(10, PuttResult::Sunk, 5);
+
+    expect(app(PuttStats::class)->fiftyPercentDistance())->toBeNull();
+});
+
+it('compares inside against outside at shared distances only', function () {
+    logPutts(10, PuttResult::Sunk, 10, PuttContext::Inside);
+    logPutts(5, PuttResult::Sunk, 10, PuttContext::Outside);
+    logPutts(5, PuttResult::MissShort, 10, PuttContext::Outside);
+    logPutts(10, PuttResult::Sunk, 30, PuttContext::Inside);
+
+    $rows = app(PuttStats::class)->insideVsOutside();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['distance_ft'])->toBe(10)
+        ->and($rows[0]['inside_percent'])->toBe(100.0)
+        ->and($rows[0]['outside_percent'])->toBe(50.0)
+        ->and($rows[0]['gap'])->toBe(50.0);
+});
+
+it('asks for more data before drawing conclusions', function () {
+    logPutts(5, PuttResult::Sunk, 5);
+
+    expect(app(PuttStats::class)->insights()[0])->toContain('25 putts');
+});
+
+it('calls out a dominant short miss tendency', function () {
+    logPutts(40, PuttResult::MissShort, 15);
+    logPutts(5, PuttResult::MissLong, 15);
+
+    $insights = app(PuttStats::class)->insights();
+
+    expect(implode(' ', $insights))->toContain('short');
+});
+
+it('tracks daily volume against the required pace', function () {
+    Carbon::setTestNow('2026-08-24 12:00:00');
+
+    $challenge = Challenge::factory()->create([
+        'start_date' => '2026-08-23',
+        'end_date' => '2026-09-19',
+        'target_total' => 2000,
+    ]);
+
+    $session = PuttingSession::factory()->create();
+    Putt::factory()->count(10)->create([
+        'putting_session_id' => $session->id,
+        'hit_at' => Carbon::parse('2026-08-23 09:00:00'),
+    ]);
+
+    $days = app(PuttStats::class)->dailyVolume($challenge);
+
+    expect($days)->toHaveCount(28)
+        ->and($days[0]['count'])->toBe(10)
+        ->and($days[0]['cumulative'])->toBe(10)
+        ->and($days[0]['target_cumulative'])->toBe(71)
+        ->and($days[27]['cumulative'])->toBeNull();
+
+    Carbon::setTestNow();
+});
