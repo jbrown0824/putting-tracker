@@ -72,15 +72,23 @@
                         class="flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 text-2xl text-slate-300 active:bg-slate-800">+</button>
             </div>
 
-            <div class="relative mt-4 flex justify-center">
+            {{-- Dims and stops accepting taps for half a second after each putt, so a
+                 logged putt is unmistakable and a double tap cannot log a phantom. --}}
+            <div class="relative mt-4 flex justify-center transition-opacity duration-150"
+                 :class="locked ? 'pointer-events-none opacity-50' : ''"
+                 :aria-busy="locked">
                 <svg viewBox="0 0 240 240" class="w-full max-w-[300px] touch-manipulation" role="group" aria-label="Putt result">
-                    <path d="M120 120 L38.7 38.7 A115 115 0 0 1 201.3 38.7 Z" class="fill-slate-800 active:fill-slate-700"
+                    <path d="M120 120 L38.7 38.7 A115 115 0 0 1 201.3 38.7 Z" class="transition-colors"
+                          :class="flash === 'miss_long' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_long')" role="button" aria-label="Missed long"/>
-                    <path d="M120 120 L201.3 38.7 A115 115 0 0 1 201.3 201.3 Z" class="fill-slate-800 active:fill-slate-700"
+                    <path d="M120 120 L201.3 38.7 A115 115 0 0 1 201.3 201.3 Z" class="transition-colors"
+                          :class="flash === 'miss_right' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_right')" role="button" aria-label="Missed right"/>
-                    <path d="M120 120 L201.3 201.3 A115 115 0 0 1 38.7 201.3 Z" class="fill-slate-800 active:fill-slate-700"
+                    <path d="M120 120 L201.3 201.3 A115 115 0 0 1 38.7 201.3 Z" class="transition-colors"
+                          :class="flash === 'miss_short' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_short')" role="button" aria-label="Missed short"/>
-                    <path d="M120 120 L38.7 201.3 A115 115 0 0 1 38.7 38.7 Z" class="fill-slate-800 active:fill-slate-700"
+                    <path d="M120 120 L38.7 201.3 A115 115 0 0 1 38.7 38.7 Z" class="transition-colors"
+                          :class="flash === 'miss_left' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_left')" role="button" aria-label="Missed left"/>
 
                     <line x1="38.7" y1="38.7" x2="201.3" y2="201.3" class="stroke-slate-950" stroke-width="2"/>
@@ -93,13 +101,15 @@
 
                     <circle cx="120" cy="120" r="54" class="fill-slate-950"/>
                     <circle cx="120" cy="120" r="50" @click="record('sunk')" role="button" aria-label="Sunk"
-                            class="fill-emerald-500/15 stroke-emerald-500 active:fill-emerald-500/40" stroke-width="3"/>
+                            class="stroke-emerald-500 transition-colors" stroke-width="3"
+                            :class="flash === 'sunk' ? 'fill-emerald-500/70' : 'fill-emerald-500/15 active:fill-emerald-500/40'"/>
                     <text x="120" y="127" text-anchor="middle" class="pointer-events-none fill-emerald-300 text-[20px] font-medium">SUNK</text>
                 </svg>
 
                 <button type="button" @click="record('lip_out')"
                         class="absolute bottom-0 right-0 flex flex-col items-center">
-                    <span class="flex h-12 w-12 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-lg text-slate-300 active:bg-slate-800">◠</span>
+                    <span class="flex h-12 w-12 items-center justify-center rounded-full border text-lg transition-colors"
+                          :class="flash === 'lip_out' ? 'border-slate-400 bg-slate-600 text-slate-50' : 'border-slate-700 bg-slate-900 text-slate-300 active:bg-slate-800'">◠</span>
                     <span class="mt-0.5 text-[10px] text-slate-500">Lip out</span>
                 </button>
             </div>

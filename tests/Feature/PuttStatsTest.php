@@ -222,3 +222,56 @@ it('counts both putters in the daily volume pace line', function () {
 
     Carbon::setTestNow();
 });
+
+it('scopes stats to a single session', function () {
+    $tonight = PuttingSession::factory()->create();
+    $lastWeek = PuttingSession::factory()->create();
+
+    Putt::factory()->count(10)->create([
+        'putting_session_id' => $tonight->id,
+        'result' => PuttResult::Sunk,
+        'distance_ft' => 10,
+    ]);
+
+    Putt::factory()->count(30)->create([
+        'putting_session_id' => $lastWeek->id,
+        'result' => PuttResult::MissShort,
+        'distance_ft' => 10,
+    ]);
+
+    $scoped = app(PuttStats::class)->forSession($tonight);
+
+    expect($scoped->byDistance()->sum('attempts'))->toBe(10)
+        ->and($scoped->missDial()['sunk']['percent'])->toBe(100.0)
+        ->and(app(PuttStats::class)->byDistance()->sum('attempts'))->toBe(40);
+});
+
+it('reads a session that holds the other putter', function () {
+    $malletNight = PuttingSession::factory()->mallet()->create();
+
+    Putt::factory()->count(8)->mallet()->create([
+        'putting_session_id' => $malletNight->id,
+        'result' => PuttResult::Sunk,
+        'distance_ft' => 12,
+    ]);
+
+    logPutts(50, PuttResult::MissShort, 12, PuttContext::Inside, Putter::Blade);
+
+    $scoped = app(PuttStats::class)->forSession($malletNight);
+
+    expect($scoped->byDistance()->sum('attempts'))->toBe(8)
+        ->and($scoped->missDial()['sunk']['percent'])->toBe(100.0);
+});
+
+it('leaves challenge progress alone when scoped to a session', function () {
+    $challenge = Challenge::factory()->create(['target_total' => 2000]);
+    $tonight = PuttingSession::factory()->create();
+
+    Putt::factory()->count(10)->create(['putting_session_id' => $tonight->id]);
+    logPutts(25, PuttResult::Sunk, 10);
+
+    $scoped = app(PuttStats::class)->forSession($tonight);
+
+    expect($scoped->progress($challenge)['total'])->toBe(35)
+        ->and($scoped->byDistance()->sum('attempts'))->toBe(10);
+});

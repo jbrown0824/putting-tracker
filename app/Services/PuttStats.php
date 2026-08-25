@@ -7,6 +7,7 @@ use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Challenge;
 use App\Models\Putt;
+use App\Models\PuttingSession;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -14,6 +15,8 @@ use Illuminate\Support\Collection;
 class PuttStats
 {
     private ?Putter $putter = null;
+
+    private ?int $sessionId = null;
 
     /**
      * A copy of this service that only ever sees one putter's putts. Passing null
@@ -23,6 +26,19 @@ class PuttStats
     {
         $clone = clone $this;
         $clone->putter = $putter;
+
+        return $clone;
+    }
+
+    /**
+     * A copy of this service narrowed to a single practice session. A session only
+     * ever holds one putter and one context, so there is no need to scope by putter
+     * as well — doing so would be redundant, never contradictory.
+     */
+    public function forSession(?PuttingSession $session): self
+    {
+        $clone = clone $this;
+        $clone->sessionId = $session?->id;
 
         return $clone;
     }
@@ -351,15 +367,16 @@ class PuttStats
     }
 
     /**
-     * Every performance query starts here, so a scoped copy can never leak the
-     * other putter's putts into a stat.
+     * Every performance query starts here, so a scoped copy can never leak another
+     * putter's or another session's putts into a stat.
      *
      * @return Builder<Putt>
      */
     private function baseQuery(): Builder
     {
         return Putt::query()
-            ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter));
+            ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter))
+            ->when($this->sessionId, fn (Builder $query, int $id): Builder => $query->where('putting_session_id', $id));
     }
 
     /**

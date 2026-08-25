@@ -156,3 +156,58 @@ it('shows the putter on each history row', function () {
 
     $this->get(route('sessions.index'))->assertOk()->assertSee('Mallet');
 });
+
+it('scopes the stats page to a single session', function () {
+    Challenge::factory()->create();
+
+    $tonight = PuttingSession::factory()->create(['started_at' => now()]);
+    Putt::factory()->count(12)->create([
+        'putting_session_id' => $tonight->id,
+        'result' => PuttResult::Sunk,
+        'distance_ft' => 10,
+    ]);
+
+    $earlier = PuttingSession::factory()->create(['started_at' => now()->subDays(3)]);
+    Putt::factory()->count(40)->create([
+        'putting_session_id' => $earlier->id,
+        'result' => PuttResult::MissShort,
+        'distance_ft' => 25,
+    ]);
+
+    $this->get(route('stats', ['session' => $tonight]))
+        ->assertOk()
+        ->assertSee('12 putts')
+        ->assertSee('Every putt')
+        // The pace chart tracks the challenge window, not one night.
+        ->assertDontSee('Pace')
+        ->assertDontSee('days left');
+});
+
+it('offers every session with putts in the scope picker', function () {
+    Challenge::factory()->create();
+
+    $withPutts = PuttingSession::factory()->create();
+    Putt::factory()->create(['putting_session_id' => $withPutts->id]);
+
+    PuttingSession::factory()->create();
+
+    $response = $this->get(route('stats'))->assertOk()->assertSee('Overall');
+
+    expect(substr_count($response->getContent(), '<option'))->toBe(2);
+});
+
+it('falls back to overall when the session does not exist', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('stats', ['session' => 99999]))
+        ->assertOk()
+        ->assertSee('days left');
+});
+
+it('links to session stats from the session detail page', function () {
+    $session = PuttingSession::factory()->create();
+
+    $this->get(route('sessions.show', $session))
+        ->assertOk()
+        ->assertSee('Stats for this session');
+});

@@ -19,6 +19,10 @@
         @if ($session->surface) · {{ $session->surface }} @endif
     </p>
 
+    <a href="{{ route('stats', ['session' => $session]) }}" class="mt-2 inline-block text-xs text-emerald-400">
+        Stats for this session ›
+    </a>
+
     @if (session('status'))
         <p class="mt-2 rounded bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{{ session('status') }}</p>
     @endif

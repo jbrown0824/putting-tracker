@@ -3,6 +3,13 @@ import Alpine from 'alpinejs';
 const QUEUE_KEY = 'putt-queue';
 const PREFS_KEY = 'putt-prefs';
 
+/**
+ * How long the dial stays lit up and unclickable after a tap. Long enough to read
+ * the confirmation, short enough not to slow down a rapid practice set — and it
+ * swallows the double tap that would otherwise log a phantom putt.
+ */
+const LOCKOUT_MS = 500;
+
 function uuid() {
     if (globalThis.crypto?.randomUUID) {
         return globalThis.crypto.randomUUID();
@@ -52,6 +59,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     awake: false,
     wakeLock: null,
     flash: null,
+    locked: false,
 
     init() {
         const prefs = read(PREFS_KEY, {});
@@ -159,6 +167,13 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     },
 
     record(result) {
+        // A tap landing inside the lockout is a fat finger, not a second putt.
+        if (this.locked) {
+            return;
+        }
+
+        this.locked = true;
+
         const putt = {
             uuid: uuid(),
             distance_ft: this.distance,
@@ -180,7 +195,8 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         this.flash = result;
         setTimeout(() => {
             this.flash = null;
-        }, 180);
+            this.locked = false;
+        }, LOCKOUT_MS);
 
         this.flush();
     },

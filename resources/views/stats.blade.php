@@ -5,31 +5,55 @@
 @section('content')
     <h1 class="pt-2 text-lg font-medium">Stats</h1>
 
-    @include('partials.putter-switch')
+    @include('partials.stats-scope')
 
-    @if ($progress === null)
-        <p class="mt-4 text-sm text-slate-400">No challenge configured yet.</p>
+    {{-- Scoped to whatever the picker selected, so an empty view says so instead of drawing zeroes. --}}
+    @php $totalPutts = $byDistance->sum('attempts'); @endphp
+
+    @if ($session !== null)
+        <div class="mt-3 rounded-lg bg-slate-900 p-3">
+            <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-slate-100">{{ $session->started_at->format('M j, g:ia') }}</span>
+                <a href="{{ route('sessions.show', $session) }}" class="text-[11px] text-emerald-400">Every putt ›</a>
+            </div>
+            <div class="mt-1 text-[11px] text-slate-500">
+                {{ $session->context->label() }} · {{ $session->putter->label() }}
+                @if ($session->location) · {{ $session->location }} @endif
+                @if ($session->surface) · {{ $session->surface }} @endif
+            </div>
+            <div class="mt-2 text-sm text-slate-300">
+                {{ $totalPutts }} putts · {{ $dial['sunk']['count'] }} sunk
+                <span class="text-slate-500">({{ $dial['sunk']['percent'] }}%)</span>
+            </div>
+        </div>
     @else
-        <div class="mt-3 grid grid-cols-3 gap-2">
-            @foreach ([
-                ['Putts', $progress['total'], '/ '.$progress['target_total']],
-                ['Outside', $progress['outside'], '/ '.$progress['target_outside_min']],
-                [$putter->label().' make', $dial['sunk']['percent'].'%', null],
-            ] as [$label, $value, $suffix])
-                <div class="rounded-lg bg-slate-900 p-3">
-                    <div class="text-[11px] text-slate-500">{{ $label }}</div>
-                    <div class="mt-0.5 whitespace-nowrap text-base font-medium">
-                        {{ $value }}@if ($suffix)<span class="text-[11px] font-normal text-slate-500"> {{ $suffix }}</span>@endif
-                    </div>
-                </div>
-            @endforeach
-        </div>
+        @include('partials.putter-switch')
 
-        <div class="mt-2 rounded-lg bg-slate-900 p-3 text-xs text-slate-400">
-            {{ $progress['days_remaining'] }} days left · {{ $progress['per_day_needed'] }} putts/day
-            ({{ $progress['outside_per_day_needed'] }}/day outside) to finish
-            <span class="mt-1 block text-[11px] text-slate-600">Challenge totals count both putters. Everything below is {{ $putter->label() }} only.</span>
-        </div>
+        @if ($progress === null)
+            <p class="mt-4 text-sm text-slate-400">No challenge configured yet.</p>
+        @else
+            <div class="mt-3 grid grid-cols-3 gap-2">
+                @foreach ([
+                    ['Putts', $progress['total'], '/ '.$progress['target_total']],
+                    ['Outside', $progress['outside'], '/ '.$progress['target_outside_min']],
+                    [$putter->label().' make', $dial['sunk']['percent'].'%', null],
+                ] as [$label, $value, $suffix])
+                    <div class="rounded-lg bg-slate-900 p-3">
+                        <div class="text-[11px] text-slate-500">{{ $label }}</div>
+                        <div class="mt-0.5 whitespace-nowrap text-base font-medium">
+                            {{ $value }}@if ($suffix)<span class="text-[11px] font-normal text-slate-500"> {{ $suffix }}</span>@endif
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+
+            <div class="mt-2 rounded-lg bg-slate-900 p-3 text-xs text-slate-400">
+                {{ $progress['days_remaining'] }} days left · {{ $progress['per_day_needed'] }} putts/day
+                ({{ $progress['outside_per_day_needed'] }}/day outside) to finish
+                <span class="mt-1 block text-[11px] text-slate-600">Challenge totals count both putters. Everything below is {{ $putter->label() }} only.</span>
+            </div>
+        @endif
+    @endif
 
         @if ($insights !== [])
             <section class="mt-5">
@@ -43,9 +67,6 @@
                 </ul>
             </section>
         @endif
-
-        {{-- Scoped to the active putter, so an empty blade view says so instead of drawing zeroes. --}}
-        @php $totalPutts = $byDistance->sum('attempts'); @endphp
 
         @if ($totalPutts > 0)
             <section class="mt-6">
@@ -179,7 +200,8 @@
             </p>
         @endif
 
-        @if ($dailyVolume->isNotEmpty())
+        {{-- The pace line is a challenge-window chart, so it has nothing to say about one session. --}}
+        @if ($session === null && $dailyVolume->isNotEmpty())
             @php
                 $maxCumulative = max(
                     $dailyVolume->max('target_cumulative') ?: 1,
@@ -213,5 +235,4 @@
                 </div>
             </section>
         @endif
-    @endif
 @endsection
