@@ -32,6 +32,8 @@ class SeedDemoPutts extends Command
 
         $this->table(['Setting', 'Value'], [
             ['Profile', $summary['profile']],
+            ['Blade putts', $summary['per_putter']['blade']],
+            ['Mallet putts', $summary['per_putter']['mallet']],
             ['Days', $summary['days']],
             ['Starts on', $summary['starts_on']],
             ['Speed tendency', $this->describeSpeed($summary['speed_tendency'])],

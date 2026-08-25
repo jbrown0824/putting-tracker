@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Challenge;
 use App\Models\Putt;
@@ -32,6 +33,27 @@ class GenerateDemoPutts
     ];
 
     /**
+     * Deltas applied on top of the base profile so the two putters behave differently
+     * enough for the comparison page to have something real to find.
+     *
+     * Modelled on how the heads actually differ: a mallet's higher MOI resists twisting
+     * on an off-centre strike, so fewer of its misses are left or right and a larger
+     * share are speed. A blade gives up more to the pull.
+     *
+     * @var array<string, array<string, float>>
+     */
+    public const PUTTER_MODIFIERS = [
+        'blade' => ['skill' => -1.5, 'decay' => 0.0, 'line_tendency' => -0.25, 'speed_share' => -0.06],
+        'mallet' => ['skill' => 1.5, 'decay' => -0.2, 'line_tendency' => 0.05, 'speed_share' => 0.08],
+    ];
+
+    /**
+     * Share of sessions played with the blade. Deliberately not 50/50 so the
+     * distance-matched weighting in PutterComparison is actually exercised.
+     */
+    private const BLADE_SESSION_SHARE = 55;
+
+    /**
      * Wipe existing putts and generate a fresh random dataset.
      *
      * @return array<string, mixed> a summary of what was generated
@@ -55,6 +77,7 @@ class GenerateDemoPutts
 
         $rows = [];
         $sessionCount = 0;
+        $perPutter = [Putter::Blade->value => 0, Putter::Mallet->value => 0];
 
         for ($day = 0; $day < $days; $day++) {
             $date = $startsOn->copy()->addDays($day);
@@ -64,18 +87,21 @@ class GenerateDemoPutts
                 continue;
             }
 
-            foreach ($this->sessionPlanFor($date) as [$context, $startedAt, $volume]) {
+            foreach ($this->sessionPlanFor($date) as [$context, $putter, $startedAt, $volume]) {
                 $session = PuttingSession::query()->create([
                     'context' => $context,
+                    'putter' => $putter,
                     'location' => $context === PuttContext::Outside ? $this->randomLocation() : null,
                     'surface' => $context === PuttContext::Outside ? 'practice green' : 'carpet',
                     'started_at' => $startedAt,
                 ]);
 
                 $sessionCount++;
+                $perPutter[$putter->value] += $volume;
+                $putterProfile = $this->applyPutterModifier($profile, $putter);
 
                 for ($i = 0; $i < $volume; $i++) {
-                    $rows[] = $this->buildPutt($session, $context, $startedAt->copy()->addSeconds($i * 35), $profile);
+                    $rows[] = $this->buildPutt($session, $context, $putter, $startedAt->copy()->addSeconds($i * 35), $putterProfile);
                 }
             }
         }
@@ -87,6 +113,7 @@ class GenerateDemoPutts
         return [
             'profile' => $profile['name'],
             'putts' => count($rows),
+            'per_putter' => $perPutter,
             'sessions' => $sessionCount,
             'days' => $days,
             'starts_on' => $startsOn->toDateString(),
@@ -128,25 +155,43 @@ class GenerateDemoPutts
     }
 
     /**
-     * @return array<int, array{0: PuttContext, 1: Carbon, 2: int}>
+     * @return array<int, array{0: PuttContext, 1: Putter, 2: Carbon, 3: int}>
      */
     private function sessionPlanFor(Carbon $date): array
     {
-        $plan = [[PuttContext::Inside, $date->copy()->setTime(mt_rand(18, 21), mt_rand(0, 50)), mt_rand(25, 80)]];
+        $plan = [[PuttContext::Inside, $this->randomPutter(), $date->copy()->setTime(mt_rand(18, 21), mt_rand(0, 50)), mt_rand(25, 80)]];
 
         // Outside practice only happens on some days.
         if (mt_rand(1, 100) <= 55) {
-            $plan[] = [PuttContext::Outside, $date->copy()->setTime(mt_rand(8, 16), mt_rand(0, 50)), mt_rand(10, 35)];
+            $plan[] = [PuttContext::Outside, $this->randomPutter(), $date->copy()->setTime(mt_rand(8, 16), mt_rand(0, 50)), mt_rand(10, 35)];
         }
 
         return $plan;
+    }
+
+    private function randomPutter(): Putter
+    {
+        return mt_rand(1, 100) <= self::BLADE_SESSION_SHARE ? Putter::Blade : Putter::Mallet;
     }
 
     /**
      * @param  array<string, mixed>  $profile
      * @return array<string, mixed>
      */
-    private function buildPutt(PuttingSession $session, PuttContext $context, Carbon $hitAt, array $profile): array
+    private function applyPutterModifier(array $profile, Putter $putter): array
+    {
+        foreach (self::PUTTER_MODIFIERS[$putter->value] as $key => $delta) {
+            $profile[$key] += $delta;
+        }
+
+        return $profile;
+    }
+
+    /**
+     * @param  array<string, mixed>  $profile
+     * @return array<string, mixed>
+     */
+    private function buildPutt(PuttingSession $session, PuttContext $context, Putter $putter, Carbon $hitAt, array $profile): array
     {
         $distance = self::LADDER[array_rand(self::LADDER)];
         $result = $this->rollResult($distance, $context, $profile);
@@ -157,6 +202,7 @@ class GenerateDemoPutts
             'distance_ft' => $distance,
             'result' => $result->value,
             'context' => $context->value,
+            'putter' => $putter->value,
             'slope' => mt_rand(1, 100) <= 40 ? $this->randomSlope() : null,
             'break_direction' => null,
             'notes' => null,

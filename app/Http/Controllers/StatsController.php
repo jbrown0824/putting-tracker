@@ -3,28 +3,62 @@
 namespace App\Http\Controllers;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Models\Challenge;
+use App\Services\PutterComparison;
 use App\Services\PuttStats;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\Request;
 
 class StatsController extends Controller
 {
-    public function index(PuttStats $stats): View
+    /**
+     * The last putter viewed, so the toggle survives a trip to the log screen.
+     */
+    private const SESSION_KEY = 'stats.putter';
+
+    public function index(Request $request, PuttStats $stats): View
     {
         $challenge = Challenge::current();
+        $putter = $this->resolvePutter($request);
+        $scoped = $stats->forPutter($putter);
 
         return view('stats', [
             'challenge' => $challenge,
+            'putter' => $putter,
+            // Progress and pace track the challenge, which counts every putt
+            // regardless of putter, so they stay on the unscoped service.
             'progress' => $challenge !== null ? $stats->progress($challenge) : null,
-            'dial' => $stats->missDial(),
-            'speedVsLine' => $stats->speedVsLine(),
-            'byDistance' => $stats->byDistance(),
-            'insideByDistance' => $stats->byDistance(PuttContext::Inside),
-            'outsideByDistance' => $stats->byDistance(PuttContext::Outside),
-            'insideVsOutside' => $stats->insideVsOutside(),
-            'fiftyPercentDistance' => $stats->fiftyPercentDistance(),
             'dailyVolume' => $challenge !== null ? $stats->dailyVolume($challenge) : collect(),
-            'insights' => $stats->insights(),
+            'dial' => $scoped->missDial(),
+            'speedVsLine' => $scoped->speedVsLine(),
+            'byDistance' => $scoped->byDistance(),
+            'insideByDistance' => $scoped->byDistance(PuttContext::Inside),
+            'outsideByDistance' => $scoped->byDistance(PuttContext::Outside),
+            'insideVsOutside' => $scoped->insideVsOutside(),
+            'fiftyPercentDistance' => $scoped->fiftyPercentDistance(),
+            'insights' => $scoped->insights(),
         ]);
+    }
+
+    public function compare(PutterComparison $comparison): View
+    {
+        return view('stats.compare', [
+            'headline' => $comparison->headline(),
+            'byDistance' => $comparison->byDistance(),
+            'verdict' => $comparison->verdict(),
+            'strengths' => $comparison->strengths(),
+        ]);
+    }
+
+    private function resolvePutter(Request $request): Putter
+    {
+        $putter = Putter::tryFrom((string) $request->query('putter'))
+            ?? Putter::tryFrom((string) $request->session()->get(self::SESSION_KEY))
+            ?? Putter::default();
+
+        $request->session()->put(self::SESSION_KEY, $putter->value);
+
+        return $putter;
     }
 }

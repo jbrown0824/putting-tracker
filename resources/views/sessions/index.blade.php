@@ -18,6 +18,9 @@
                     <span class="ml-1 rounded px-1.5 py-0.5 text-[10px] {{ $session->context->value === 'outside' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-300' }}">
                         {{ $session->context->label() }}
                     </span>
+                    <span class="ml-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-300">
+                        {{ $session->putter->label() }}
+                    </span>
                 </div>
                 <div class="mt-0.5 text-[11px] text-slate-500">
                     {{ $session->putts_count }} putts · {{ $session->sunk_count }} sunk

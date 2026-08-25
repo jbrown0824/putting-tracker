@@ -38,6 +38,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     ladder,
     distance: 10,
     context: 'inside',
+    putter: 'blade',
     slope: null,
     breakDirection: null,
     location: '',
@@ -56,6 +57,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         const prefs = read(PREFS_KEY, {});
         this.distance = prefs.distance ?? 10;
         this.context = prefs.context ?? 'inside';
+        this.putter = prefs.putter ?? 'blade';
         this.slope = prefs.slope ?? null;
         this.breakDirection = prefs.breakDirection ?? null;
         this.location = prefs.location ?? '';
@@ -84,16 +86,25 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         setInterval(() => this.flush(), 30000);
     },
 
+    /**
+     * The on-screen session summary covers the putter in hand only, so switching
+     * mid-practice does not blend the two. `recent` itself stays unfiltered so undo
+     * still reaches back across a switch.
+     */
+    get sessionPutts() {
+        return this.recent.filter((p) => p.putter === this.putter);
+    },
+
     get sessionCount() {
-        return this.recent.length;
+        return this.sessionPutts.length;
     },
 
     get sessionSunk() {
-        return this.recent.filter((p) => p.result === 'sunk').length;
+        return this.sessionPutts.filter((p) => p.result === 'sunk').length;
     },
 
     get sessionPercent() {
-        return this.recent.length ? Math.round((this.sessionSunk / this.recent.length) * 100) : 0;
+        return this.sessionCount ? Math.round((this.sessionSunk / this.sessionCount) * 100) : 0;
     },
 
     get pending() {
@@ -104,6 +115,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         write(PREFS_KEY, {
             distance: this.distance,
             context: this.context,
+            putter: this.putter,
             slope: this.slope,
             breakDirection: this.breakDirection,
             location: this.location,
@@ -113,6 +125,11 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
 
     setContext(context) {
         this.context = context;
+        this.savePrefs();
+    },
+
+    setPutter(putter) {
+        this.putter = putter;
         this.savePrefs();
     },
 
@@ -147,6 +164,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
             distance_ft: this.distance,
             result,
             context: this.context,
+            putter: this.putter,
             slope: this.slope || null,
             break_direction: this.breakDirection || null,
             location: this.location || null,

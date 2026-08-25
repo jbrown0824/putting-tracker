@@ -5,6 +5,8 @@
 @section('content')
     <h1 class="pt-2 text-lg font-medium">Stats</h1>
 
+    @include('partials.putter-switch')
+
     @if ($progress === null)
         <p class="mt-4 text-sm text-slate-400">No challenge configured yet.</p>
     @else
@@ -12,7 +14,7 @@
             @foreach ([
                 ['Putts', $progress['total'], '/ '.$progress['target_total']],
                 ['Outside', $progress['outside'], '/ '.$progress['target_outside_min']],
-                ['Make rate', $progress['make_percent'].'%', null],
+                [$putter->label().' make', $dial['sunk']['percent'].'%', null],
             ] as [$label, $value, $suffix])
                 <div class="rounded-lg bg-slate-900 p-3">
                     <div class="text-[11px] text-slate-500">{{ $label }}</div>
@@ -26,6 +28,7 @@
         <div class="mt-2 rounded-lg bg-slate-900 p-3 text-xs text-slate-400">
             {{ $progress['days_remaining'] }} days left · {{ $progress['per_day_needed'] }} putts/day
             ({{ $progress['outside_per_day_needed'] }}/day outside) to finish
+            <span class="mt-1 block text-[11px] text-slate-600">Challenge totals count both putters. Everything below is {{ $putter->label() }} only.</span>
         </div>
 
         @if ($insights !== [])
@@ -41,7 +44,8 @@
             </section>
         @endif
 
-        @php $totalPutts = $progress['total']; @endphp
+        {{-- Scoped to the active putter, so an empty blade view says so instead of drawing zeroes. --}}
+        @php $totalPutts = $byDistance->sum('attempts'); @endphp
 
         @if ($totalPutts > 0)
             <section class="mt-6">
@@ -171,7 +175,7 @@
             @endif
         @else
             <p class="mt-6 rounded-lg bg-slate-900 p-4 text-sm text-slate-400">
-                No putts logged yet. Head to the Log tab and start tapping.
+                No putts logged with the {{ strtolower($putter->label()) }} yet. Head to the Log tab, switch to it, and start tapping.
             </p>
         @endif
 

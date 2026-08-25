@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
 use Database\Factories\PuttFactory;
@@ -23,6 +24,7 @@ class Putt extends Model
         'distance_ft',
         'result',
         'context',
+        'putter',
         'slope',
         'break_direction',
         'notes',
@@ -34,6 +36,7 @@ class Putt extends Model
         return [
             'result' => PuttResult::class,
             'context' => PuttContext::class,
+            'putter' => Putter::class,
             'slope' => PuttSlope::class,
             'distance_ft' => 'integer',
             'hit_at' => 'datetime',
@@ -44,6 +47,13 @@ class Putt extends Model
     public function session(): BelongsTo
     {
         return $this->belongsTo(PuttingSession::class, 'putting_session_id');
+    }
+
+    /** @param Builder<Putt> $query */
+    #[Scope]
+    protected function forPutter(Builder $query, Putter $putter): Builder
+    {
+        return $query->where('putter', $putter);
     }
 
     /** @param Builder<Putt> $query */

@@ -34,7 +34,17 @@
                 <span>{{ $progress['days_remaining'] }} days left · <span x-text="progress.per_day_needed"></span>/day</span>
             </div>
 
-            <div class="mt-4 grid grid-cols-2 gap-2">
+            <div class="mt-4 grid grid-cols-2 gap-1.5">
+                @foreach (\App\Enums\Putter::cases() as $option)
+                    <button type="button" @click="setPutter('{{ $option->value }}')"
+                            class="rounded-lg py-2 text-xs font-medium transition"
+                            :class="putter === '{{ $option->value }}' ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50' : 'border border-slate-800 text-slate-500'">
+                        {{ $option->label() }}
+                    </button>
+                @endforeach
+            </div>
+
+            <div class="mt-2 grid grid-cols-2 gap-2">
                 <button type="button" @click="setContext('inside')"
                         class="rounded-lg py-3 text-sm font-medium transition"
                         :class="context === 'inside' ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'">
@@ -96,7 +106,7 @@
 
             <div class="mt-3 text-center text-xs text-slate-400">
                 <template x-if="sessionCount > 0">
-                    <span>This session · <span x-text="sessionCount"></span> putts · <span x-text="sessionSunk"></span> sunk (<span x-text="sessionPercent"></span>%)</span>
+                    <span><span class="capitalize" x-text="putter"></span> this session · <span x-text="sessionCount"></span> putts · <span x-text="sessionSunk"></span> sunk (<span x-text="sessionPercent"></span>%)</span>
                 </template>
                 <template x-if="sessionCount === 0">
                     <span>Tap the dial to log your first putt.</span>

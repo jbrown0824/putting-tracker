@@ -1,25 +1,13 @@
 <?php
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
 use App\Services\PuttStats;
 use Illuminate\Support\Carbon;
-
-function logPutts(int $count, PuttResult $result, int $distance, PuttContext $context = PuttContext::Inside): void
-{
-    $session = PuttingSession::factory()->create(['context' => $context]);
-
-    Putt::factory()->count($count)->create([
-        'putting_session_id' => $session->id,
-        'result' => $result,
-        'distance_ft' => $distance,
-        'context' => $context,
-        'hit_at' => Carbon::now(),
-    ]);
-}
 
 it('reports progress and the pace needed to finish', function () {
     Carbon::setTestNow('2026-08-23 12:00:00');
@@ -165,6 +153,72 @@ it('tracks daily volume against the required pace', function () {
         ->and($days[0]['cumulative'])->toBe(10)
         ->and($days[0]['target_cumulative'])->toBe(71)
         ->and($days[27]['cumulative'])->toBeNull();
+
+    Carbon::setTestNow();
+});
+
+it('keeps each putter\'s performance stats completely isolated', function () {
+    logPutts(20, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(20, PuttResult::MissShort, 10, PuttContext::Inside, Putter::Mallet);
+
+    $blade = app(PuttStats::class)->forPutter(Putter::Blade);
+    $mallet = app(PuttStats::class)->forPutter(Putter::Mallet);
+
+    expect($blade->byDistance()->sum('attempts'))->toBe(20)
+        ->and($blade->missDial()['sunk']['percent'])->toBe(100.0)
+        ->and($mallet->byDistance()->sum('attempts'))->toBe(20)
+        ->and($mallet->missDial()['sunk']['percent'])->toBe(0.0)
+        ->and($mallet->missDial()['miss_short']['percent'])->toBe(100.0);
+});
+
+it('scopes the speed and line split to the selected putter', function () {
+    logPutts(10, PuttResult::MissShort, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(10, PuttResult::MissLeft, 10, PuttContext::Inside, Putter::Mallet);
+
+    $blade = app(PuttStats::class)->forPutter(Putter::Blade)->speedVsLine();
+    $mallet = app(PuttStats::class)->forPutter(Putter::Mallet)->speedVsLine();
+
+    expect($blade['speed'])->toBe(10)
+        ->and($blade['line'])->toBe(0)
+        ->and($mallet['speed'])->toBe(0)
+        ->and($mallet['line'])->toBe(10);
+});
+
+it('names the putter in its insights when scoped', function () {
+    logPutts(40, PuttResult::MissShort, 15, PuttContext::Inside, Putter::Mallet);
+
+    $insights = app(PuttStats::class)->forPutter(Putter::Mallet)->insights();
+
+    expect(implode(' ', $insights))->toContain('With the mallet');
+});
+
+it('counts both putters towards challenge progress even when scoped', function () {
+    $challenge = Challenge::factory()->create(['target_total' => 2000]);
+
+    logPutts(30, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(20, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Mallet);
+
+    $scoped = app(PuttStats::class)->forPutter(Putter::Blade);
+
+    expect($scoped->progress($challenge)['total'])->toBe(50)
+        ->and($scoped->byDistance()->sum('attempts'))->toBe(30);
+});
+
+it('counts both putters in the daily volume pace line', function () {
+    Carbon::setTestNow('2026-08-24 12:00:00');
+
+    $challenge = Challenge::factory()->create([
+        'start_date' => '2026-08-24',
+        'end_date' => '2026-09-20',
+        'target_total' => 2000,
+    ]);
+
+    logPutts(6, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(4, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Mallet);
+
+    $days = app(PuttStats::class)->forPutter(Putter::Blade)->dailyVolume($challenge);
+
+    expect($days[0]['count'])->toBe(10);
 
     Carbon::setTestNow();
 });

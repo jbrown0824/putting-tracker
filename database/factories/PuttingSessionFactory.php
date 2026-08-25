@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Models\PuttingSession;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Carbon;
@@ -14,6 +15,7 @@ class PuttingSessionFactory extends Factory
     {
         return [
             'context' => PuttContext::Inside,
+            'putter' => Putter::Blade,
             'location' => null,
             'surface' => null,
             'notes' => null,
@@ -25,5 +27,10 @@ class PuttingSessionFactory extends Factory
     public function outside(): static
     {
         return $this->state(fn () => ['context' => PuttContext::Outside]);
+    }
+
+    public function mallet(): static
+    {
+        return $this->state(fn () => ['putter' => Putter::Mallet]);
     }
 }

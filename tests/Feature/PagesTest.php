@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Challenge;
 use App\Models\Putt;
@@ -43,7 +44,7 @@ it('renders the stats page with data', function () {
 it('renders the stats page with no putts', function () {
     Challenge::factory()->create();
 
-    $this->get(route('stats'))->assertOk()->assertSee('No putts logged yet');
+    $this->get(route('stats'))->assertOk()->assertSee('No putts logged with the blade yet');
 });
 
 it('lists sessions with make rates', function () {
@@ -90,4 +91,68 @@ it('deletes a session and its putts', function () {
 
     expect(PuttingSession::count())->toBe(0)
         ->and(Putt::count())->toBe(0);
+});
+
+it('shows a putter toggle on the stats page', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Blade')
+        ->assertSee('Mallet')
+        ->assertSee('Compare');
+});
+
+it('scopes the stats page to the requested putter', function () {
+    Challenge::factory()->create();
+
+    logMakeRate(40, 100, 12, Putter::Blade);
+
+    $this->get(route('stats', ['putter' => 'mallet']))
+        ->assertOk()
+        ->assertSee('No putts logged with the mallet yet')
+        ->assertDontSee('Make rate by distance');
+
+    $this->get(route('stats', ['putter' => 'blade']))
+        ->assertOk()
+        ->assertSee('Make rate by distance')
+        ->assertDontSee('No putts logged with the blade yet');
+});
+
+it('remembers the last putter viewed', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('stats', ['putter' => 'mallet']))->assertOk();
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Everything below is Mallet only');
+});
+
+it('asks for more data on the compare page before recommending', function () {
+    logMakeRate(20, 50, 10, Putter::Blade);
+    logMakeRate(20, 90, 10, Putter::Mallet);
+
+    $this->get(route('stats.compare'))
+        ->assertOk()
+        ->assertSee('Keep logging')
+        ->assertSee('Not enough data to call it');
+});
+
+it('recommends a putter on the compare page once the data supports it', function () {
+    logMakeRate(120, 30, 10, Putter::Blade);
+    logMakeRate(120, 70, 10, Putter::Mallet);
+
+    $this->get(route('stats.compare'))
+        ->assertOk()
+        ->assertSee('Recommended')
+        ->assertSee('Play the mallet')
+        ->assertSee('Head to head')
+        ->assertSee('Matched distances');
+});
+
+it('shows the putter on each history row', function () {
+    PuttingSession::factory()->mallet()->create();
+
+    $this->get(route('sessions.index'))->assertOk()->assertSee('Mallet');
 });

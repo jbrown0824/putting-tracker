@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', [LogController::class, 'index'])->name('log');
 Route::get('/stats', [StatsController::class, 'index'])->name('stats');
+Route::get('/stats/compare', [StatsController::class, 'compare'])->name('stats.compare');
 
 Route::get('/sessions', [SessionController::class, 'index'])->name('sessions.index');
 Route::get('/sessions/{session}', [SessionController::class, 'show'])->name('sessions.show');

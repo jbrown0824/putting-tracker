@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Putt;
 use App\Models\PuttingSession;
@@ -21,6 +22,7 @@ class PuttFactory extends Factory
             'distance_ft' => fake()->randomElement([3, 5, 8, 10, 12, 15, 20]),
             'result' => fake()->randomElement(PuttResult::cases()),
             'context' => PuttContext::Inside,
+            'putter' => Putter::Blade,
             'hit_at' => Carbon::now(),
         ];
     }
@@ -33,6 +35,11 @@ class PuttFactory extends Factory
     public function outside(): static
     {
         return $this->state(fn () => ['context' => PuttContext::Outside]);
+    }
+
+    public function mallet(): static
+    {
+        return $this->state(fn () => ['putter' => Putter::Mallet]);
     }
 
     public function atDistance(int $feet): static

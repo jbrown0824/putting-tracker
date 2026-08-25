@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use Database\Factories\PuttingSessionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,6 +16,7 @@ class PuttingSession extends Model
 
     protected $fillable = [
         'context',
+        'putter',
         'location',
         'surface',
         'notes',
@@ -26,6 +28,7 @@ class PuttingSession extends Model
     {
         return [
             'context' => PuttContext::class,
+            'putter' => Putter::class,
             'started_at' => 'datetime',
             'ended_at' => 'datetime',
         ];

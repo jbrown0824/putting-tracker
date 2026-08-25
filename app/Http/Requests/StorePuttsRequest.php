@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
 use Illuminate\Foundation\Http\FormRequest;
@@ -24,6 +25,7 @@ class StorePuttsRequest extends FormRequest
             'putts.*.distance_ft' => ['required', 'integer', 'min:1', 'max:120'],
             'putts.*.result' => ['required', Rule::enum(PuttResult::class)],
             'putts.*.context' => ['required', Rule::enum(PuttContext::class)],
+            'putts.*.putter' => ['nullable', Rule::enum(Putter::class)],
             'putts.*.slope' => ['nullable', Rule::enum(PuttSlope::class)],
             'putts.*.break_direction' => ['nullable', 'string', 'max:40'],
             'putts.*.location' => ['nullable', 'string', 'max:120'],

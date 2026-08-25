@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Models\PuttingSession;
 use Illuminate\Support\Carbon;
 
@@ -15,14 +16,18 @@ class ResolvePuttingSession
 
     /**
      * Sessions are implicit: a putt joins the most recent session sharing its context
-     * unless too much time has passed, in which case a fresh session opens.
+     * and putter unless too much time has passed, in which case a fresh session opens.
+     *
+     * Switching putters splits the session even mid-practice, so a session's make rate
+     * always describes exactly one putter.
      *
      * @param  array{location?: string|null, surface?: string|null}  $attributes
      */
-    public function execute(PuttContext $context, Carbon $hitAt, array $attributes = []): PuttingSession
+    public function execute(PuttContext $context, Putter $putter, Carbon $hitAt, array $attributes = []): PuttingSession
     {
         $candidate = PuttingSession::query()
             ->where('context', $context)
+            ->where('putter', $putter)
             ->where('started_at', '<=', $hitAt)
             ->latest('started_at')
             ->first();
@@ -33,6 +38,7 @@ class ResolvePuttingSession
 
         return PuttingSession::query()->create([
             'context' => $context,
+            'putter' => $putter,
             'location' => $attributes['location'] ?? null,
             'surface' => $attributes['surface'] ?? null,
             'started_at' => $hitAt,

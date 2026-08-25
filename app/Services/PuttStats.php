@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Challenge;
 use App\Models\Putt;
@@ -12,8 +13,31 @@ use Illuminate\Support\Collection;
 
 class PuttStats
 {
+    private ?Putter $putter = null;
+
+    /**
+     * A copy of this service that only ever sees one putter's putts. Passing null
+     * returns an unscoped copy that pools both.
+     */
+    public function forPutter(?Putter $putter): self
+    {
+        $clone = clone $this;
+        $clone->putter = $putter;
+
+        return $clone;
+    }
+
+    public function putter(): ?Putter
+    {
+        return $this->putter;
+    }
+
     /**
      * Progress against the challenge targets, plus the pace needed to finish on time.
+     *
+     * Deliberately unscoped: the challenge is a volume goal, so every putt counts
+     * towards it no matter which putter hit it. Calling this on a scoped copy still
+     * returns combined figures.
      *
      * @return array<string, int|float>
      */
@@ -52,7 +76,7 @@ class PuttStats
      */
     public function missDial(): array
     {
-        $counts = Putt::query()
+        $counts = $this->baseQuery()
             ->selectRaw('result, count(*) as total')
             ->groupBy('result')
             ->pluck('total', 'result');
@@ -82,7 +106,7 @@ class PuttStats
      */
     public function speedVsLine(?PuttContext $context = null): array
     {
-        $query = Putt::query()->where('result', '!=', PuttResult::Sunk);
+        $query = $this->baseQuery()->where('result', '!=', PuttResult::Sunk);
 
         if ($context !== null) {
             $query->where('context', $context);
@@ -117,7 +141,7 @@ class PuttStats
      */
     public function byDistance(?PuttContext $context = null): Collection
     {
-        $query = Putt::query();
+        $query = $this->baseQuery();
 
         if ($context !== null) {
             $query->where('context', $context);
@@ -212,6 +236,9 @@ class PuttStats
     /**
      * Daily volume against the flat pace line the challenge requires.
      *
+     * Unscoped for the same reason as progress(): the pace line tracks the challenge,
+     * which counts every putt regardless of putter.
+     *
      * Grouped in PHP rather than SQL so the query stays portable between
      * SQLite locally and Postgres in production.
      *
@@ -262,19 +289,24 @@ class PuttStats
     {
         $insights = [];
         $overall = $this->speedVsLine();
-        $attempts = Putt::query()->count();
+        $attempts = $this->baseQuery()->count();
 
         if ($attempts < 25) {
-            return ['Log around 25 putts to start seeing patterns here.'];
+            return [$this->putter !== null
+                ? sprintf('Log around 25 putts with the %s to start seeing patterns here.', strtolower($this->putter->label()))
+                : 'Log around 25 putts to start seeing patterns here.'];
         }
 
         if ($overall['speed'] + $overall['line'] > 0) {
             $dominant = $overall['speed_percent'] >= $overall['line_percent'] ? 'speed' : 'line';
             $share = max($overall['speed_percent'], $overall['line_percent']);
+            $prefix = $this->putter !== null
+                ? sprintf('With the %s, ', strtolower($this->putter->label()))
+                : '';
 
             $insights[] = $dominant === 'speed'
-                ? sprintf('%s%% of your misses are short or long — this is distance control, not aim.', $share)
-                : sprintf('%s%% of your misses are left or right — this is read and aim, not speed.', $share);
+                ? sprintf('%s%s%% of your misses are short or long — this is distance control, not aim.', $prefix, $share)
+                : sprintf('%s%s%% of your misses are left or right — this is read and aim, not speed.', $prefix, $share);
         }
 
         $dial = $this->missDial();
@@ -316,6 +348,18 @@ class PuttStats
         }
 
         return $insights === [] ? ['No strong patterns yet — keep logging.'] : $insights;
+    }
+
+    /**
+     * Every performance query starts here, so a scoped copy can never leak the
+     * other putter's putts into a stat.
+     *
+     * @return Builder<Putt>
+     */
+    private function baseQuery(): Builder
+    {
+        return Putt::query()
+            ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter));
     }
 
     /**

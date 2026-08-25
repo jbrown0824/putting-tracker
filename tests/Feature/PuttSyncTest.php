@@ -1,6 +1,7 @@
 <?php
 
 use App\Actions\ResolvePuttingSession;
+use App\Enums\Putter;
 use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
@@ -101,4 +102,48 @@ it('deletes a putt by uuid so undo works after syncing', function () {
     $this->deleteJson(route('api.putts.destroy', $putt['uuid']))->assertOk();
 
     expect(Putt::count())->toBe(0);
+});
+
+it('stores the putter a putt was hit with', function () {
+    Challenge::factory()->create();
+
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['putter' => 'mallet'])],
+    ])->assertOk();
+
+    expect(Putt::first()->putter)->toBe(Putter::Mallet)
+        ->and(PuttingSession::first()->putter)->toBe(Putter::Mallet);
+});
+
+it('defaults to the blade when a client syncs without a putter', function () {
+    Challenge::factory()->create();
+
+    // A phone running a bundle from before putter tracking shipped. Its queued
+    // putts still have to land rather than fail validation forever.
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload()],
+    ])->assertOk();
+
+    expect(Putt::first()->putter)->toBe(Putter::Blade);
+});
+
+it('rejects an unknown putter', function () {
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['putter' => 'broomstick'])],
+    ])->assertJsonValidationErrorFor('putts.0.putter');
+});
+
+it('starts a new session when the putter changes mid-practice', function () {
+    Challenge::factory()->create();
+    $start = Carbon::parse('2026-08-23 10:00:00');
+
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [
+            puttPayload(['hit_at' => $start->toIso8601String(), 'putter' => 'blade']),
+            puttPayload(['hit_at' => $start->copy()->addMinutes(2)->toIso8601String(), 'putter' => 'mallet']),
+        ],
+    ])->assertOk();
+
+    expect(PuttingSession::count())->toBe(2)
+        ->and(PuttingSession::pluck('putter')->all())->toEqualCanonicalizing([Putter::Blade, Putter::Mallet]);
 });

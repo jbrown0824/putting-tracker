@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\PuttContext;
+use App\Enums\Putter;
 use App\Models\Putt;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -29,7 +30,13 @@ class RecordPutts
                 $hitAt = Carbon::parse($putt['hit_at']);
                 $context = PuttContext::from($putt['context']);
 
-                $session = $this->resolveSession->execute($context, $hitAt, [
+                // Clients queue putts offline, so a bundle predating putter tracking
+                // can still post batches without one.
+                $putter = isset($putt['putter'])
+                    ? Putter::from($putt['putter'])
+                    : Putter::default();
+
+                $session = $this->resolveSession->execute($context, $putter, $hitAt, [
                     'location' => $putt['location'] ?? null,
                     'surface' => $putt['surface'] ?? null,
                 ]);
@@ -41,6 +48,7 @@ class RecordPutts
                         'distance_ft' => $putt['distance_ft'],
                         'result' => $putt['result'],
                         'context' => $context,
+                        'putter' => $putter,
                         'slope' => $putt['slope'] ?? null,
                         'break_direction' => $putt['break_direction'] ?? null,
                         'notes' => $putt['notes'] ?? null,

@@ -1,6 +1,12 @@
 <?php
 
+use App\Enums\PuttContext;
+use App\Enums\Putter;
+use App\Enums\PuttResult;
+use App\Models\Putt;
+use App\Models\PuttingSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /*
@@ -44,7 +50,50 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
-{
-    // ..
+/**
+ * Log a run of identical putts into a session of their own.
+ */
+function logPutts(
+    int $count,
+    PuttResult $result,
+    int $distance,
+    PuttContext $context = PuttContext::Inside,
+    Putter $putter = Putter::Blade,
+): void {
+    $session = PuttingSession::factory()->create([
+        'context' => $context,
+        'putter' => $putter,
+    ]);
+
+    Putt::factory()->count($count)->create([
+        'putting_session_id' => $session->id,
+        'result' => $result,
+        'distance_ft' => $distance,
+        'context' => $context,
+        'putter' => $putter,
+        'hit_at' => Carbon::now(),
+    ]);
+}
+
+/**
+ * A run of putts at one distance split between makes and one kind of miss, which is
+ * how the comparison tests dial in a specific make rate.
+ */
+function logMakeRate(
+    int $attempts,
+    float $makePercent,
+    int $distance,
+    Putter $putter,
+    PuttContext $context = PuttContext::Inside,
+    PuttResult $miss = PuttResult::MissShort,
+): void {
+    $made = (int) round($attempts * $makePercent / 100);
+
+    if ($made > 0) {
+        logPutts($made, PuttResult::Sunk, $distance, $context, $putter);
+    }
+
+    if ($attempts - $made > 0) {
+        logPutts($attempts - $made, $miss, $distance, $context, $putter);
+    }
 }

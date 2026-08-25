@@ -14,7 +14,7 @@
     </div>
 
     <p class="mt-1 text-[11px] text-slate-500">
-        {{ $session->context->label() }}
+        {{ $session->context->label() }} · {{ $session->putter->label() }}
         @if ($session->location) · {{ $session->location }} @endif
         @if ($session->surface) · {{ $session->surface }} @endif
     </p>
