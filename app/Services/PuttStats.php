@@ -16,6 +16,8 @@ class PuttStats
 {
     private ?Putter $putter = null;
 
+    private ?PuttContext $context = null;
+
     private ?int $sessionId = null;
 
     /**
@@ -26,6 +28,22 @@ class PuttStats
     {
         $clone = clone $this;
         $clone->putter = $putter;
+
+        return $clone;
+    }
+
+    /**
+     * A copy of this service narrowed to inside or outside putts. Passing null
+     * returns an unscoped copy that pools both.
+     *
+     * Note that insideVsOutside() returns nothing on a context-scoped copy — it has
+     * only one side left to compare. Callers that want that comparison should ask an
+     * unscoped copy for it.
+     */
+    public function inContext(?PuttContext $context): self
+    {
+        $clone = clone $this;
+        $clone->context = $context;
 
         return $clone;
     }
@@ -46,6 +64,11 @@ class PuttStats
     public function putter(): ?Putter
     {
         return $this->putter;
+    }
+
+    public function context(): ?PuttContext
+    {
+        return $this->context;
     }
 
     /**
@@ -308,17 +331,18 @@ class PuttStats
         $attempts = $this->baseQuery()->count();
 
         if ($attempts < 25) {
-            return [$this->putter !== null
-                ? sprintf('Log around 25 putts with the %s to start seeing patterns here.', strtolower($this->putter->label()))
-                : 'Log around 25 putts to start seeing patterns here.'];
+            $scope = $this->scopeSuffix();
+
+            return [$scope === ''
+                ? 'Log around 25 putts to start seeing patterns here.'
+                : sprintf('Log around 25 putts %s to start seeing patterns here.', $scope)];
         }
 
         if ($overall['speed'] + $overall['line'] > 0) {
             $dominant = $overall['speed_percent'] >= $overall['line_percent'] ? 'speed' : 'line';
             $share = max($overall['speed_percent'], $overall['line_percent']);
-            $prefix = $this->putter !== null
-                ? sprintf('With the %s, ', strtolower($this->putter->label()))
-                : '';
+            $scope = $this->scopeSuffix();
+            $prefix = $scope === '' ? '' : ucfirst($scope).', ';
 
             $insights[] = $dominant === 'speed'
                 ? sprintf('%s%s%% of your misses are short or long — this is distance control, not aim.', $prefix, $share)
@@ -367,6 +391,20 @@ class PuttStats
     }
 
     /**
+     * How the current scope reads in a sentence: "with the mallet outside",
+     * "outside", "with the blade", or an empty string when nothing is scoped.
+     */
+    private function scopeSuffix(): string
+    {
+        $parts = array_filter([
+            $this->putter !== null ? sprintf('with the %s', strtolower($this->putter->label())) : null,
+            $this->context !== null ? strtolower($this->context->label()) : null,
+        ]);
+
+        return implode(' ', $parts);
+    }
+
+    /**
      * Every performance query starts here, so a scoped copy can never leak another
      * putter's or another session's putts into a stat.
      *
@@ -376,6 +414,7 @@ class PuttStats
     {
         return Putt::query()
             ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter))
+            ->when($this->context, fn (Builder $query, PuttContext $context): Builder => $query->where('context', $context))
             ->when($this->sessionId, fn (Builder $query, int $id): Builder => $query->where('putting_session_id', $id));
     }
 

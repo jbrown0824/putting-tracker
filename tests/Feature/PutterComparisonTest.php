@@ -132,3 +132,61 @@ it('reports the totals for each putter side by side', function () {
         ->and($headline[Putter::Mallet->value]['attempts'])->toBe(50)
         ->and($headline[Putter::Mallet->value]['outside']['make_percent'])->toBe(80.0);
 });
+
+it('breaks each putter down by inside and outside', function () {
+    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 60, 10, Putter::Mallet, PuttContext::Inside);
+    logMakeRate(40, 55, 10, Putter::Mallet, PuttContext::Outside);
+
+    $breakdown = app(PutterComparison::class)->contextBreakdown();
+
+    expect($breakdown[Putter::Blade->value]['inside']['make_percent'])->toBe(75.0)
+        ->and($breakdown[Putter::Blade->value]['outside']['make_percent'])->toBe(50.0)
+        ->and($breakdown[Putter::Blade->value]['drop'])->toBe(25.0)
+        ->and($breakdown[Putter::Mallet->value]['drop'])->toBe(5.0)
+        ->and($breakdown[Putter::Mallet->value]['comparable'])->toBeTrue();
+});
+
+it('marks a putter uncomparable until it has putts on both sides', function () {
+    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
+
+    $breakdown = app(PutterComparison::class)->contextBreakdown();
+
+    expect($breakdown[Putter::Blade->value]['comparable'])->toBeFalse()
+        ->and($breakdown[Putter::Blade->value]['outside']['attempts'])->toBe(0);
+});
+
+it('keeps the context breakdown whole even when the comparison is filtered', function () {
+    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
+
+    $breakdown = app(PutterComparison::class)
+        ->inContext(PuttContext::Outside)
+        ->contextBreakdown();
+
+    expect($breakdown[Putter::Blade->value]['inside']['attempts'])->toBe(40)
+        ->and($breakdown[Putter::Blade->value]['drop'])->toBe(25.0);
+});
+
+it('recommends a putter for outside putting on its own merits', function () {
+    // The blade is better on the carpet, the mallet on real greens.
+    logMakeRate(120, 80, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(120, 40, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(120, 50, 10, Putter::Mallet, PuttContext::Inside);
+    logMakeRate(120, 70, 10, Putter::Mallet, PuttContext::Outside);
+
+    $comparison = app(PutterComparison::class);
+
+    expect($comparison->inContext(PuttContext::Outside)->verdict()['putter'])->toBe(Putter::Mallet)
+        ->and($comparison->inContext(PuttContext::Inside)->verdict()['putter'])->toBe(Putter::Blade);
+});
+
+it('counts only the scoped context in the filtered headline', function () {
+    logMakeRate(60, 50, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
+
+    $headline = app(PutterComparison::class)->inContext(PuttContext::Outside)->headline();
+
+    expect($headline[Putter::Blade->value]['attempts'])->toBe(40);
+});

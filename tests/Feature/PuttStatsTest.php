@@ -275,3 +275,58 @@ it('leaves challenge progress alone when scoped to a session', function () {
     expect($scoped->progress($challenge)['total'])->toBe(35)
         ->and($scoped->byDistance()->sum('attempts'))->toBe(10);
 });
+
+it('scopes stats to inside or outside', function () {
+    logPutts(20, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(20, PuttResult::MissShort, 10, PuttContext::Outside, Putter::Blade);
+
+    $stats = app(PuttStats::class)->forPutter(Putter::Blade);
+
+    expect($stats->inContext(PuttContext::Inside)->missDial()['sunk']['percent'])->toBe(100.0)
+        ->and($stats->inContext(PuttContext::Outside)->missDial()['sunk']['percent'])->toBe(0.0)
+        ->and($stats->inContext(null)->missDial()['sunk']['percent'])->toBe(50.0);
+});
+
+it('combines putter and context scopes', function () {
+    logPutts(10, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Mallet);
+    logPutts(30, PuttResult::MissShort, 10, PuttContext::Outside, Putter::Blade);
+    logPutts(30, PuttResult::MissLong, 10, PuttContext::Inside, Putter::Mallet);
+
+    $scoped = app(PuttStats::class)->forPutter(Putter::Mallet)->inContext(PuttContext::Outside);
+
+    expect($scoped->byDistance()->sum('attempts'))->toBe(10)
+        ->and($scoped->missDial()['sunk']['percent'])->toBe(100.0);
+});
+
+it('names both the putter and the context in its insights', function () {
+    logPutts(40, PuttResult::MissShort, 15, PuttContext::Outside, Putter::Mallet);
+
+    $insights = app(PuttStats::class)
+        ->forPutter(Putter::Mallet)
+        ->inContext(PuttContext::Outside)
+        ->insights();
+
+    expect(implode(' ', $insights))->toContain('With the mallet outside');
+});
+
+it('has nothing to compare inside against outside once a context is pinned', function () {
+    logPutts(10, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(10, PuttResult::MissShort, 10, PuttContext::Outside, Putter::Blade);
+
+    $stats = app(PuttStats::class)->forPutter(Putter::Blade);
+
+    expect($stats->inContext(null)->insideVsOutside())->toHaveCount(1)
+        ->and($stats->inContext(PuttContext::Outside)->insideVsOutside())->toBeEmpty();
+});
+
+it('counts every putt towards challenge progress whatever the context scope', function () {
+    $challenge = Challenge::factory()->create(['target_total' => 2000]);
+
+    logPutts(30, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(20, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Mallet);
+
+    $scoped = app(PuttStats::class)->forPutter(Putter::Blade)->inContext(PuttContext::Inside);
+
+    expect($scoped->progress($challenge)['total'])->toBe(50)
+        ->and($scoped->byDistance()->sum('attempts'))->toBe(30);
+});

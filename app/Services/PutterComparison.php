@@ -36,7 +36,59 @@ class PutterComparison
     /** @var Collection<int, array<string, mixed>>|null */
     private ?Collection $byDistance = null;
 
+    private ?PuttContext $context = null;
+
     public function __construct(private PuttStats $stats) {}
+
+    /**
+     * Narrow the whole comparison to inside or outside putts, so "which putter is
+     * better on a real green" gets its own answer rather than being averaged away.
+     *
+     * contextBreakdown() deliberately ignores this — comparing the two contexts is
+     * its entire job.
+     */
+    public function inContext(?PuttContext $context): self
+    {
+        $clone = clone $this;
+        $clone->context = $context;
+        $clone->headline = null;
+        $clone->byDistance = null;
+
+        return $clone;
+    }
+
+    public function context(): ?PuttContext
+    {
+        return $this->context;
+    }
+
+    /**
+     * How each putter holds up when you leave the carpet: inside and outside make
+     * rates side by side, plus the points given up moving between them.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function contextBreakdown(): array
+    {
+        $breakdown = [];
+
+        foreach (Putter::cases() as $putter) {
+            // Deliberately not context-scoped: this row spans both sides.
+            $scoped = $this->stats->forPutter($putter);
+            $inside = $this->contextSummary($scoped, PuttContext::Inside);
+            $outside = $this->contextSummary($scoped, PuttContext::Outside);
+
+            $breakdown[$putter->value] = [
+                'putter' => $putter,
+                'inside' => $inside,
+                'outside' => $outside,
+                'comparable' => $inside['attempts'] > 0 && $outside['attempts'] > 0,
+                'drop' => round($inside['make_percent'] - $outside['make_percent'], 1),
+            ];
+        }
+
+        return $breakdown;
+    }
 
     /**
      * Side-by-side totals for each putter, keyed by putter value.
@@ -55,7 +107,7 @@ class PutterComparison
         $headline = [];
 
         foreach (Putter::cases() as $putter) {
-            $scoped = $this->stats->forPutter($putter);
+            $scoped = $this->scopedStats($putter);
             $dial = $scoped->missDial();
             $split = $scoped->speedVsLine();
 
@@ -93,8 +145,8 @@ class PutterComparison
             return $this->byDistance;
         }
 
-        $blade = $this->stats->forPutter(Putter::Blade)->byDistance()->keyBy('distance_ft');
-        $mallet = $this->stats->forPutter(Putter::Mallet)->byDistance()->keyBy('distance_ft');
+        $blade = $this->scopedStats(Putter::Blade)->byDistance()->keyBy('distance_ft');
+        $mallet = $this->scopedStats(Putter::Mallet)->byDistance()->keyBy('distance_ft');
 
         return $this->byDistance = $blade->keys()
             ->intersect($mallet->keys())
@@ -510,6 +562,14 @@ class PutterComparison
                 $loserSide,
             ),
         ];
+    }
+
+    /**
+     * One putter's stats, narrowed to this comparison's context if it has one.
+     */
+    private function scopedStats(Putter $putter): PuttStats
+    {
+        return $this->stats->forPutter($putter)->inContext($this->context);
     }
 
     /**

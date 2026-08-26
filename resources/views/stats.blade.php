@@ -28,6 +28,7 @@
         </div>
     @else
         @include('partials.putter-switch')
+        @include('partials.context-switch')
 
         @if ($progress === null)
             <p class="mt-4 text-sm text-slate-400">No challenge configured yet.</p>
@@ -50,7 +51,9 @@
             <div class="mt-2 rounded-lg bg-slate-900 p-3 text-xs text-slate-400">
                 {{ $progress['days_remaining'] }} days left · {{ $progress['per_day_needed'] }} putts/day
                 ({{ $progress['outside_per_day_needed'] }}/day outside) to finish
-                <span class="mt-1 block text-[11px] text-slate-600">Challenge totals count both putters. Everything below is {{ $putter->label() }} only.</span>
+                <span class="mt-1 block text-[11px] text-slate-600">
+                    Challenge totals count every putt. Everything below is {{ $putter->label() }}{{ $context !== null ? ', '.strtolower($context->label()).' only' : ' only' }}.
+                </span>
             </div>
         @endif
     @endif
@@ -165,10 +168,11 @@
                 </section>
             @endif
 
+            {{-- Empty by construction once a context filter is on: there is only one side left. --}}
             @if ($insideVsOutside->isNotEmpty())
                 <section class="mt-6">
-                    <h2 class="text-sm font-medium text-slate-300">Inside vs. outside</h2>
-                    <p class="mt-1 text-[11px] text-slate-500">Only distances you have played in both.</p>
+                    <h2 class="text-sm font-medium text-slate-300">Inside vs. outside by distance</h2>
+                    <p class="mt-1 text-[11px] text-slate-500">{{ $putter->label() }} only, at distances you have played in both.</p>
                     <div class="mt-2 space-y-2">
                         @foreach ($insideVsOutside as $row)
                             <div>
@@ -196,8 +200,13 @@
             @endif
         @else
             <p class="mt-6 rounded-lg bg-slate-900 p-4 text-sm text-slate-400">
-                No putts logged with the {{ strtolower($putter->label()) }} yet. Head to the Log tab, switch to it, and start tapping.
+                No {{ $context !== null ? strtolower($context->label()).' ' : '' }}putts logged with the {{ strtolower($putter->label()) }} yet.
+                Head to the Log tab, switch to it, and start tapping.
             </p>
+        @endif
+
+        @if ($session === null)
+            @include('partials.context-breakdown')
         @endif
 
         {{-- The pace line is a challenge-window chart, so it has nothing to say about one session. --}}

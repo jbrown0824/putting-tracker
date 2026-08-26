@@ -10,9 +10,15 @@
 @endphp
 
 @section('content')
-    <h1 class="pt-2 text-lg font-medium">Blade vs. Mallet</h1>
+    <h1 class="pt-2 text-lg font-medium">
+        Blade vs. Mallet
+        @if ($context !== null)
+            <span class="text-slate-500">· {{ $context->label() }}</span>
+        @endif
+    </h1>
 
     @include('partials.putter-switch', ['putter' => null])
+    @include('partials.context-switch')
 
     <section class="mt-4">
         @if ($verdict['state'] === 'recommended')
@@ -48,8 +54,11 @@
                 $rows = [
                     ['Putts', $blade['attempts'], $mallet['attempts'], false],
                     ['Make rate', $blade['make_percent'].'%', $mallet['make_percent'].'%', true],
-                    ['Inside', $blade['inside']['make_percent'].'%', $mallet['inside']['make_percent'].'%', true],
-                    ['Outside', $blade['outside']['make_percent'].'%', $mallet['outside']['make_percent'].'%', true],
+                    // Splitting by context is meaningless once the page is filtered to one.
+                    ...($context !== null ? [] : [
+                        ['Inside', $blade['inside']['make_percent'].'%', $mallet['inside']['make_percent'].'%', true],
+                        ['Outside', $blade['outside']['make_percent'].'%', $mallet['outside']['make_percent'].'%', true],
+                    ]),
                     ['50% distance', $blade['fifty_percent_distance'] ? $blade['fifty_percent_distance'].'ft' : '—', $mallet['fifty_percent_distance'] ? $mallet['fifty_percent_distance'].'ft' : '—', false],
                     ['Speed misses', $blade['speed_percent'].'%', $mallet['speed_percent'].'%', false],
                     ['Line misses', $blade['line_percent'].'%', $mallet['line_percent'].'%', false],
@@ -69,8 +78,12 @@
                 </div>
             @endforeach
         </div>
-        <p class="mt-1 text-[11px] text-slate-600">Raw totals — they include distances only one putter has played, which is why the verdict above uses matched distances instead.</p>
+        <p class="mt-1 text-[11px] text-slate-600">
+            Raw totals{{ $context !== null ? ' for '.strtolower($context->label()).' putts' : '' }} — they include distances only one putter has played, which is why the verdict above uses matched distances instead.
+        </p>
     </section>
+
+    @include('partials.context-breakdown')
 
     @if ($byDistance->isNotEmpty())
         <section class="mt-6">

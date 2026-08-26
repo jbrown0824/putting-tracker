@@ -211,3 +211,105 @@ it('links to session stats from the session detail page', function () {
         ->assertOk()
         ->assertSee('Stats for this session');
 });
+
+it('filters the stats page to a context', function () {
+    Challenge::factory()->create();
+
+    logMakeRate(40, 100, 12, Putter::Blade, PuttContext::Inside);
+
+    $this->get(route('stats', ['putter' => 'blade', 'context' => 'outside']))
+        ->assertOk()
+        ->assertSee('No outside putts logged with the blade yet');
+
+    $this->get(route('stats', ['putter' => 'blade', 'context' => 'inside']))
+        ->assertOk()
+        ->assertSee('Make rate by distance')
+        ->assertSee('Everything below is Blade, inside only');
+});
+
+it('remembers the last context viewed', function () {
+    Challenge::factory()->create();
+    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Outside);
+
+    $this->get(route('stats', ['context' => 'outside']))->assertOk();
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Everything below is Blade, outside only');
+});
+
+it('clears the context filter by following the Both link', function () {
+    Challenge::factory()->create();
+    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 90, 12, Putter::Blade, PuttContext::Outside);
+
+    $filtered = $this->get(route('stats', ['context' => 'outside']))
+        ->assertOk()
+        ->assertSee('Everything below is Blade, outside only');
+
+    // Follow the link the page actually renders rather than building the URL by
+    // hand. The filter is sticky, so a Both link that merely omitted the parameter
+    // would read as "no opinion" and silently leave outside in place.
+    expect(preg_match('/<a href="([^"]+)"[^>]*>\s*Both\s*<\/a>/', $filtered->getContent(), $matches))->toBe(1);
+
+    $this->get(html_entity_decode($matches[1]))
+        ->assertOk()
+        ->assertSee('Everything below is Blade only')
+        ->assertDontSee('outside only');
+});
+
+it('highlights whichever context is active', function () {
+    Challenge::factory()->create();
+    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Outside);
+
+    $active = '/<a href="[^"]*"[^>]*ring-sky-500\/50[^>]*>\s*%s\s*<\/a>/';
+
+    $both = $this->get(route('stats', ['context' => PuttContext::ANY]))->getContent();
+    $outside = $this->get(route('stats', ['context' => 'outside']))->getContent();
+
+    expect(preg_match(sprintf($active, 'Both'), $both))->toBe(1)
+        ->and(preg_match(sprintf($active, 'Outside'), $both))->toBe(0)
+        ->and(preg_match(sprintf($active, 'Outside'), $outside))->toBe(1)
+        ->and(preg_match(sprintf($active, 'Both'), $outside))->toBe(0);
+});
+
+it('shows the carpet versus greens breakdown for both putters', function () {
+    Challenge::factory()->create();
+
+    logMakeRate(40, 80, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 55, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 60, 10, Putter::Mallet, PuttContext::Inside);
+    logMakeRate(40, 58, 10, Putter::Mallet, PuttContext::Outside);
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Carpet vs. real greens')
+        ->assertSee('The mallet travels best');
+});
+
+it('hides the context switch and breakdown when scoped to a session', function () {
+    Challenge::factory()->create();
+
+    $session = PuttingSession::factory()->create();
+    Putt::factory()->count(10)->create(['putting_session_id' => $session->id]);
+
+    $this->get(route('stats', ['session' => $session]))
+        ->assertOk()
+        ->assertDontSee('Carpet vs. real greens')
+        ->assertDontSee('Both');
+});
+
+it('filters the compare page to a context', function () {
+    logMakeRate(120, 80, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(120, 40, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(120, 50, 10, Putter::Mallet, PuttContext::Inside);
+    logMakeRate(120, 70, 10, Putter::Mallet, PuttContext::Outside);
+
+    $this->get(route('stats.compare', ['context' => 'outside']))
+        ->assertOk()
+        ->assertSee('Play the mallet');
+
+    $this->get(route('stats.compare', ['context' => 'inside']))
+        ->assertOk()
+        ->assertSee('Play the blade');
+});
