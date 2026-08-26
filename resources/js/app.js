@@ -98,7 +98,11 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     },
 
     /**
-     * The on-screen session summary covers the putter in hand only, so switching
+     * Every putt logged since the page loaded. It is deliberately not truncated:
+     * it backs both the undo stack and the session tally, so a cap would silently
+     * stop the counter climbing. The list is display-sliced in the view instead.
+     *
+     * The on-screen summary covers the putter in hand only, so switching
      * mid-practice does not blend the two. `recent` itself stays unfiltered so undo
      * still reaches back across a switch.
      */
@@ -203,7 +207,6 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
 
         this.queue.push(putt);
         this.recent.unshift(putt);
-        this.recent = this.recent.slice(0, 12);
         write(QUEUE_KEY, this.queue);
 
         this.flash = result;
