@@ -38,7 +38,34 @@ class PutterComparison
 
     private ?PuttContext $context = null;
 
-    public function __construct(private PuttStats $stats) {}
+    public function __construct(private PuttStats $stats, private PuttingProfile $profile) {}
+
+    /**
+     * Each putter's radar profile, for overlaying one shape on the other.
+     *
+     * The two shapes are drawn on one set of spokes, so they must share an axis set.
+     * The line axis therefore splits only when both putters have enough classified
+     * misses — letting each decide alone would put a hexagon over a pentagon, and a
+     * putter with three labelled misses would score a Stroke axis off nearly nothing.
+     *
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    public function profiles(): array
+    {
+        $scoped = [];
+
+        foreach (Putter::cases() as $putter) {
+            $scoped[$putter->value] = $this->scopedStats($putter);
+        }
+
+        $splitLine = collect($scoped)->every(
+            fn (PuttStats $stats): bool => $this->profile->canSplitLine($stats),
+        );
+
+        return collect($scoped)
+            ->map(fn (PuttStats $stats): array => $this->profile->build($stats, $splitLine))
+            ->all();
+    }
 
     /**
      * Narrow the whole comparison to inside or outside putts, so "which putter is
@@ -254,6 +281,7 @@ class PutterComparison
             $this->rangeStrength($matched, 'Short range', fn (int $d): bool => $d <= 8, 'inside 8 ft'),
             $this->rangeStrength($matched, 'Long range', fn (int $d): bool => $d >= 15, 'from 15 ft and out'),
             $this->lineControlStrength($headline),
+            $this->faceControlStrength(),
             $this->outdoorStrength($headline),
             $this->reachStrength($headline),
             $this->aimStrength($headline),
@@ -420,6 +448,61 @@ class PutterComparison
                 'Only %s%% of its misses are left or right, against %s%% for the %s. The rest are speed, which is the easier error to fix.',
                 $winnerLine,
                 $loserLine,
+                strtolower($winner->other()->label()),
+            ),
+        ];
+    }
+
+    /**
+     * The sharpest test of whether a head shape is earning its keep. A high-MOI
+     * mallet should cut pushes and pulls, because it resists twisting on an
+     * off-centre strike; it can do nothing about a misread green. So the comparison
+     * that matters is stroke misses per putt, not line misses per putt.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function faceControlStrength(): ?array
+    {
+        $rates = [];
+
+        foreach ([Putter::Blade, Putter::Mallet] as $putter) {
+            $scoped = $this->scopedStats($putter);
+            $causes = $scoped->lineMissCauses();
+
+            if ($causes['classified'] < 15) {
+                return null;
+            }
+
+            $attempts = (int) $scoped->byDistance()->sum('attempts');
+
+            if ($attempts <= 0) {
+                return null;
+            }
+
+            // Extrapolate the classified sample across every line miss, as the radar does.
+            $lineMisses = $scoped->speedVsLine()['line'];
+            $rates[$putter->value] = round(
+                $lineMisses * ($causes['stroke_percent'] / 100) / $attempts * 100,
+                1,
+            );
+        }
+
+        $gap = round($rates[Putter::Blade->value] - $rates[Putter::Mallet->value], 1);
+
+        if (abs($gap) < 2.0) {
+            return null;
+        }
+
+        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
+
+        return [
+            'putter' => $winner,
+            'magnitude' => abs($gap) * 3,
+            'headline' => 'Squares the face',
+            'detail' => sprintf(
+                'Only %s%% of putts are pushed or pulled with it, against %s%% for the %s. That gap is the head shape doing its job, not the read.',
+                $rates[$winner->value],
+                $rates[$winner->other()->value],
                 strtolower($winner->other()->label()),
             ),
         ];

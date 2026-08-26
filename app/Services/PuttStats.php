@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -170,6 +171,59 @@ class PuttStats
             'lip_out' => $lipOut,
             'speed_percent' => $this->percent($speed, $classified),
             'line_percent' => $this->percent($line, $classified),
+        ];
+    }
+
+    /**
+     * Left and right misses split by cause, plus how that split changes between the
+     * carpet and a real green. Read errors should spike outside, where the ground
+     * actually breaks; stroke errors should not care either way.
+     *
+     * Only counts classified misses — anything logged on the simple dial is unknown
+     * rather than zero, so it is reported separately instead of skewing the split.
+     *
+     * @return array<string, mixed>
+     */
+    public function lineMissCauses(): array
+    {
+        $rows = $this->baseQuery()
+            ->whereIn('result', [PuttResult::MissLeft, PuttResult::MissRight])
+            ->selectRaw('miss_cause, context, count(*) as total')
+            ->groupBy('miss_cause', 'context')
+            ->get();
+
+        $countFor = fn (?LineMissCause $cause, ?PuttContext $context): int => (int) $rows
+            ->when($context !== null, fn ($all) => $all->where('context', $context->value))
+            ->where('miss_cause', $cause?->value)
+            ->sum('total');
+
+        $stroke = $countFor(LineMissCause::Stroke, null);
+        $read = $countFor(LineMissCause::Read, null);
+        $classified = $stroke + $read;
+
+        $byContext = [];
+
+        foreach (PuttContext::cases() as $context) {
+            $contextStroke = $countFor(LineMissCause::Stroke, $context);
+            $contextRead = $countFor(LineMissCause::Read, $context);
+            $contextTotal = $contextStroke + $contextRead;
+
+            $byContext[$context->value] = [
+                'stroke' => $contextStroke,
+                'read' => $contextRead,
+                'classified' => $contextTotal,
+                'read_percent' => $this->percent($contextRead, $contextTotal),
+            ];
+        }
+
+        return [
+            'stroke' => $stroke,
+            'read' => $read,
+            'classified' => $classified,
+            'unclassified' => $countFor(null, null),
+            'stroke_percent' => $this->percent($stroke, $classified),
+            'read_percent' => $this->percent($read, $classified),
+            'by_context' => $byContext,
         ];
     }
 
@@ -365,6 +419,30 @@ class PuttStats
         if ($left + $right >= 10 && abs($left - $right) / max(1, $left + $right) >= 0.3) {
             $side = $left > $right ? 'left' : 'right';
             $insights[] = sprintf('Your line misses skew %s. A consistent one-sided miss is usually aim or path, not the read.', $side);
+        }
+
+        $causes = $this->lineMissCauses();
+
+        if ($causes['classified'] >= 15) {
+            $dominant = $causes['stroke'] >= $causes['read'] ? LineMissCause::Stroke : LineMissCause::Read;
+
+            $insights[] = sprintf(
+                '%s%% of your classified line misses are %s. That means %s.',
+                max($causes['stroke_percent'], $causes['read_percent']),
+                $dominant === LineMissCause::Stroke ? 'pushes or pulls' : 'misread breaks',
+                $dominant->coaching(),
+            );
+
+            $inside = $causes['by_context'][PuttContext::Inside->value];
+            $outside = $causes['by_context'][PuttContext::Outside->value];
+
+            if ($inside['classified'] >= 8 && $outside['classified'] >= 8) {
+                $swing = round($outside['read_percent'] - $inside['read_percent'], 1);
+
+                $insights[] = $swing >= 15.0
+                    ? sprintf('Misreads jump from %s%% of your line misses inside to %s%% outside — real greens are exposing the read, not the stroke.', $inside['read_percent'], $outside['read_percent'])
+                    : sprintf('Misreads barely move between inside (%s%%) and outside (%s%%), so the greens are not the problem — the stroke travels with you.', $inside['read_percent'], $outside['read_percent']);
+            }
         }
 
         $gaps = $this->insideVsOutside()

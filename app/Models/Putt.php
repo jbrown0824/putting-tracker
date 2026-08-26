@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -23,6 +24,7 @@ class Putt extends Model
         'putting_session_id',
         'distance_ft',
         'result',
+        'miss_cause',
         'context',
         'putter',
         'slope',
@@ -35,6 +37,7 @@ class Putt extends Model
     {
         return [
             'result' => PuttResult::class,
+            'miss_cause' => LineMissCause::class,
             'context' => PuttContext::class,
             'putter' => Putter::class,
             'slope' => PuttSlope::class,

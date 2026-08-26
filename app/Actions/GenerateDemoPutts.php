@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -18,18 +19,21 @@ class GenerateDemoPutts
     /**
      * Named tendencies so a reseed can reproduce a specific weakness on demand.
      *
+     * skill:          drives the distance at which the putter is a coin flip
+     *                 (skill / 12 feet), so 90 is a half-distance of 7.5 ft.
+     * decay:          how steeply the make rate falls away with distance.
      * speed_tendency: -1 always leaves short, +1 always runs past.
      * line_tendency:  -1 always misses left, +1 always misses right.
      *
      * @var array<string, array<string, float>>
      */
     public const PROFILES = [
-        'lag' => ['skill' => 96, 'decay' => 3.2, 'speed_tendency' => -0.8, 'line_tendency' => 0.05, 'speed_share' => 0.7],
-        'charger' => ['skill' => 98, 'decay' => 3.0, 'speed_tendency' => 0.7, 'line_tendency' => -0.05, 'speed_share' => 0.68],
-        'puller' => ['skill' => 95, 'decay' => 3.1, 'speed_tendency' => -0.1, 'line_tendency' => -0.75, 'speed_share' => 0.32],
-        'pusher' => ['skill' => 95, 'decay' => 3.1, 'speed_tendency' => 0.1, 'line_tendency' => 0.75, 'speed_share' => 0.32],
-        'elite' => ['skill' => 102, 'decay' => 2.1, 'speed_tendency' => 0.15, 'line_tendency' => 0.0, 'speed_share' => 0.5],
-        'struggling' => ['skill' => 88, 'decay' => 4.2, 'speed_tendency' => -0.5, 'line_tendency' => -0.3, 'speed_share' => 0.55],
+        'lag' => ['skill' => 94, 'decay' => 2.0, 'speed_tendency' => -0.8, 'line_tendency' => 0.05, 'speed_share' => 0.7],
+        'charger' => ['skill' => 96, 'decay' => 2.0, 'speed_tendency' => 0.7, 'line_tendency' => -0.05, 'speed_share' => 0.68],
+        'puller' => ['skill' => 90, 'decay' => 2.05, 'speed_tendency' => -0.1, 'line_tendency' => -0.75, 'speed_share' => 0.32],
+        'pusher' => ['skill' => 90, 'decay' => 2.05, 'speed_tendency' => 0.1, 'line_tendency' => 0.75, 'speed_share' => 0.32],
+        'elite' => ['skill' => 130, 'decay' => 1.8, 'speed_tendency' => 0.15, 'line_tendency' => 0.0, 'speed_share' => 0.5],
+        'struggling' => ['skill' => 62, 'decay' => 2.3, 'speed_tendency' => -0.5, 'line_tendency' => -0.3, 'speed_share' => 0.55],
     ];
 
     /**
@@ -43,8 +47,8 @@ class GenerateDemoPutts
      * @var array<string, array<string, float>>
      */
     public const PUTTER_MODIFIERS = [
-        'blade' => ['skill' => -1.5, 'decay' => 0.0, 'line_tendency' => -0.25, 'speed_share' => -0.06],
-        'mallet' => ['skill' => 1.5, 'decay' => -0.2, 'line_tendency' => 0.05, 'speed_share' => 0.08],
+        'blade' => ['skill' => -5.0, 'decay' => 0.05, 'line_tendency' => -0.25, 'speed_share' => -0.06, 'read_share' => -0.08],
+        'mallet' => ['skill' => 5.0, 'decay' => -0.05, 'line_tendency' => 0.05, 'speed_share' => 0.08, 'read_share' => 0.08],
     ];
 
     /**
@@ -136,8 +140,8 @@ class GenerateDemoPutts
 
         return [
             'name' => 'random',
-            'skill' => mt_rand(880, 1010) / 10,
-            'decay' => mt_rand(20, 45) / 10,
+            'skill' => mt_rand(700, 1250) / 10,
+            'decay' => mt_rand(170, 240) / 100,
             'speed_tendency' => mt_rand(-80, 80) / 100,
             'line_tendency' => mt_rand(-70, 70) / 100,
             'speed_share' => mt_rand(30, 72) / 100,
@@ -151,6 +155,10 @@ class GenerateDemoPutts
         return [
             'outdoor_penalty' => mt_rand(4, 22),
             'lip_out_rate' => mt_rand(2, 7),
+            // Share of indoor line misses that are misread breaks rather than the stroke.
+            'read_share' => mt_rand(20, 45) / 100,
+            // Not every putt gets classified: the simple dial leaves the cause blank.
+            'classified_share' => mt_rand(60, 90) / 100,
         ];
     }
 
@@ -201,6 +209,7 @@ class GenerateDemoPutts
             'putting_session_id' => $session->id,
             'distance_ft' => $distance,
             'result' => $result->value,
+            'miss_cause' => $this->rollMissCause($result, $context, $profile)?->value,
             'context' => $context->value,
             'putter' => $putter->value,
             'slope' => mt_rand(1, 100) <= 40 ? $this->randomSlope() : null,
@@ -212,16 +221,27 @@ class GenerateDemoPutts
         ];
     }
 
-    /** @param array<string, mixed> $profile */
+    /**
+     * Real make rates follow a curve that is steep up close and flattens out long —
+     * roughly 90% from 3 ft, half from 7 or 8 ft, single digits from 30. A straight
+     * line through those points is far too generous in the middle, which made every
+     * generated dataset look tour-standard from 12 ft.
+     *
+     * skill shifts the whole curve out or in; decay steepens or flattens it.
+     *
+     * @param  array<string, mixed>  $profile
+     */
     private function rollResult(int $distance, PuttContext $context, array $profile): PuttResult
     {
-        $makeChance = $profile['skill'] - ($distance * $profile['decay']);
+        $halfDistance = $profile['skill'] / 12;
 
         if ($context === PuttContext::Outside) {
-            $makeChance -= $profile['outdoor_penalty'];
+            $halfDistance *= 1 - ($profile['outdoor_penalty'] / 100);
         }
 
-        $makeChance = max(2.0, min(97.0, $makeChance));
+        $makeChance = 100 / (1 + ($distance / max(1.5, $halfDistance)) ** $profile['decay']);
+
+        $makeChance = max(1.0, min(98.0, $makeChance));
         $roll = mt_rand(0, 10000) / 100;
 
         if ($roll < $makeChance) {
@@ -244,6 +264,30 @@ class GenerateDemoPutts
         $leftChance = 0.5 - ($profile['line_tendency'] * 0.42);
 
         return mt_rand(0, 100) / 100 < $leftChance ? PuttResult::MissLeft : PuttResult::MissRight;
+    }
+
+    /**
+     * A flat carpet barely breaks, so indoors almost every line miss is the stroke.
+     * Outdoors the read starts costing real strokes, which is the whole reason the
+     * two are worth separating.
+     *
+     * @param  array<string, mixed>  $profile
+     */
+    private function rollMissCause(PuttResult $result, PuttContext $context, array $profile): ?LineMissCause
+    {
+        if (! LineMissCause::appliesTo($result)) {
+            return null;
+        }
+
+        if (mt_rand(0, 10000) / 10000 > $profile['classified_share']) {
+            return null;
+        }
+
+        $readShare = $context === PuttContext::Outside
+            ? min(0.85, $profile['read_share'] + 0.3)
+            : $profile['read_share'];
+
+        return mt_rand(0, 10000) / 10000 < $readShare ? LineMissCause::Read : LineMissCause::Stroke;
     }
 
     private function randomSlope(): string

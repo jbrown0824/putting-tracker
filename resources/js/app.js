@@ -51,6 +51,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     location: '',
     surface: '',
     advancedOpen: false,
+    advancedMisses: false,
     queue: [],
     recent: [],
     synced: initialProgress ?? {},
@@ -59,6 +60,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     awake: false,
     wakeLock: null,
     flash: null,
+    flashCause: null,
     locked: false,
 
     init() {
@@ -68,6 +70,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         this.putter = prefs.putter ?? 'blade';
         this.slope = prefs.slope ?? null;
         this.breakDirection = prefs.breakDirection ?? null;
+        this.advancedMisses = prefs.advancedMisses ?? false;
         this.location = prefs.location ?? '';
         this.surface = prefs.surface ?? '';
         this.queue = read(QUEUE_KEY, []);
@@ -126,6 +129,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
             putter: this.putter,
             slope: this.slope,
             breakDirection: this.breakDirection,
+            advancedMisses: this.advancedMisses,
             location: this.location,
             surface: this.surface,
         });
@@ -138,6 +142,11 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
 
     setPutter(putter) {
         this.putter = putter;
+        this.savePrefs();
+    },
+
+    toggleAdvancedMisses() {
+        this.advancedMisses = !this.advancedMisses;
         this.savePrefs();
     },
 
@@ -166,7 +175,11 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         }
     },
 
-    record(result) {
+    /**
+     * `cause` only comes from the split left/right wedges in advanced mode, and the
+     * server drops it on any other result.
+     */
+    record(result, cause = null) {
         // A tap landing inside the lockout is a fat finger, not a second putt.
         if (this.locked) {
             return;
@@ -178,6 +191,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
             uuid: uuid(),
             distance_ft: this.distance,
             result,
+            miss_cause: cause,
             context: this.context,
             putter: this.putter,
             slope: this.slope || null,
@@ -193,8 +207,10 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         write(QUEUE_KEY, this.queue);
 
         this.flash = result;
+        this.flashCause = cause;
         setTimeout(() => {
             this.flash = null;
+            this.flashCause = null;
             this.locked = false;
         }, LOCKOUT_MS);
 

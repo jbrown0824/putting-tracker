@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -26,6 +27,7 @@ class StorePuttsRequest extends FormRequest
             'putts.*.result' => ['required', Rule::enum(PuttResult::class)],
             'putts.*.context' => ['required', Rule::enum(PuttContext::class)],
             'putts.*.putter' => ['nullable', Rule::enum(Putter::class)],
+            'putts.*.miss_cause' => ['nullable', Rule::enum(LineMissCause::class)],
             'putts.*.slope' => ['nullable', Rule::enum(PuttSlope::class)],
             'putts.*.break_direction' => ['nullable', 'string', 'max:40'],
             'putts.*.location' => ['nullable', 'string', 'max:120'],

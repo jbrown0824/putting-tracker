@@ -71,6 +71,36 @@
             </section>
         @endif
 
+        @php
+            $profile = app(\App\Services\PuttingProfile::class);
+            $extremes = $profile->extremes($profileAxes);
+        @endphp
+
+        @if ($profile->isReadable($profileAxes))
+            <section class="mt-6">
+                <h2 class="text-sm font-medium text-slate-300">Play style</h2>
+                <p class="mt-1 text-[11px] text-slate-500">
+                    Each axis is scored against a solid amateur, who sits at {{ \App\Services\PuttingProfile::BASELINE_SCORE }}.
+                    The shape matters more than the size.
+                </p>
+
+                @include('partials.putting-profile', [
+                    'shapes' => [[
+                        'label' => $session !== null ? 'This session' : $putter->label(),
+                        'colour' => 'rgb(16 185 129)',
+                        'axes' => $profileAxes,
+                    ]],
+                    'profileNote' => $extremes === null ? null : sprintf(
+                        'Strongest: %s — %s. Weakest: %s — %s.',
+                        strtolower($extremes['best']['label']),
+                        $extremes['best']['summary'],
+                        strtolower($extremes['worst']['label']),
+                        $extremes['worst']['summary'],
+                    ),
+                ])
+            </section>
+        @endif
+
         @if ($totalPutts > 0)
             <section class="mt-6">
                 <h2 class="text-sm font-medium text-slate-300">Your miss pattern</h2>
@@ -119,6 +149,46 @@
                         <span>Speed ({{ $speedVsLine['speed'] }} short/long)</span>
                         <span>Line ({{ $speedVsLine['line'] }} left/right)</span>
                     </div>
+
+                    @if ($lineMissCauses['classified'] >= 5)
+                        <div class="mt-3 rounded-lg bg-slate-900 p-3">
+                            <div class="text-[11px] text-slate-400">Of those line misses</div>
+
+                            <div class="mt-1.5 flex h-7 overflow-hidden rounded">
+                                <div class="flex items-center justify-center bg-slate-500/40 text-[10px] font-medium text-slate-100"
+                                     style="width: {{ max(12, $lineMissCauses['stroke_percent']) }}%">
+                                    {{ $lineMissCauses['stroke_percent'] }}%
+                                </div>
+                                <div class="flex items-center justify-center bg-sky-500/30 text-[10px] font-medium text-sky-200"
+                                     style="width: {{ max(12, $lineMissCauses['read_percent']) }}%">
+                                    {{ $lineMissCauses['read_percent'] }}%
+                                </div>
+                            </div>
+
+                            <div class="mt-1 flex justify-between text-[10px] text-slate-500">
+                                <span>Push / pull ({{ $lineMissCauses['stroke'] }})</span>
+                                <span>Misread ({{ $lineMissCauses['read'] }})</span>
+                            </div>
+
+                            @php
+                                $inside = $lineMissCauses['by_context'][\App\Enums\PuttContext::Inside->value];
+                                $outside = $lineMissCauses['by_context'][\App\Enums\PuttContext::Outside->value];
+                            @endphp
+
+                            @if ($inside['classified'] >= 5 && $outside['classified'] >= 5)
+                                <div class="mt-2 border-t border-slate-800 pt-2 text-[10px] text-slate-500">
+                                    Misreads: <span class="text-slate-300">{{ $inside['read_percent'] }}%</span> inside ·
+                                    <span class="text-slate-300">{{ $outside['read_percent'] }}%</span> outside
+                                </div>
+                            @endif
+
+                            @if ($lineMissCauses['unclassified'] > 0)
+                                <div class="mt-1 text-[10px] text-slate-600">
+                                    {{ $lineMissCauses['unclassified'] }} line {{ Str::plural('miss', $lineMissCauses['unclassified']) }} logged without a cause.
+                                </div>
+                            @endif
+                        </div>
+                    @endif
                 </section>
             @endif
 

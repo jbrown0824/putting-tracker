@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -312,4 +313,53 @@ it('filters the compare page to a context', function () {
     $this->get(route('stats.compare', ['context' => 'inside']))
         ->assertOk()
         ->assertSee('Play the blade');
+});
+
+it('shows the split dial and its toggle on the log screen', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('log'))
+        ->assertOk()
+        ->assertSee('Split pull / read')
+        ->assertSee('Pulled it left')
+        ->assertSee('Misread the break right')
+        ->assertSee('PUSH');
+});
+
+it('shows the stroke versus read breakdown once misses are classified', function () {
+    Challenge::factory()->create();
+
+    logPutts(40, PuttResult::Sunk, 10);
+    logCause(15, PuttResult::MissLeft, LineMissCause::Stroke);
+    logCause(5, PuttResult::MissRight, LineMissCause::Read);
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Of those line misses')
+        ->assertSee('Push / pull (15)')
+        ->assertSee('Misread (5)');
+});
+
+it('hides the cause breakdown when nothing is classified', function () {
+    Challenge::factory()->create();
+
+    logPutts(40, PuttResult::Sunk, 10);
+    logPutts(20, PuttResult::MissLeft, 10);
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('Speed vs. line')
+        ->assertDontSee('Of those line misses');
+});
+
+it('reports how many line misses were logged without a cause', function () {
+    Challenge::factory()->create();
+
+    logPutts(40, PuttResult::Sunk, 10);
+    logCause(10, PuttResult::MissLeft, LineMissCause::Stroke);
+    logCause(7, PuttResult::MissLeft, null);
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertSee('7 line misses logged without a cause');
 });

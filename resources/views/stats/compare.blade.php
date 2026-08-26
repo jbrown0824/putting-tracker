@@ -41,6 +41,28 @@
         @endif
     </section>
 
+    @php
+        $profile = app(\App\Services\PuttingProfile::class);
+        $bladeAxes = $profiles[Putter::Blade->value];
+        $malletAxes = $profiles[Putter::Mallet->value];
+    @endphp
+
+    @if ($profile->isReadable($bladeAxes) || $profile->isReadable($malletAxes))
+        <section class="mt-6">
+            <h2 class="text-sm font-medium text-slate-300">Play style</h2>
+            <p class="mt-1 text-[11px] text-slate-500">
+                Where the two strokes differ in shape. Each axis is scored against a solid amateur, who sits at {{ \App\Services\PuttingProfile::BASELINE_SCORE }}.
+            </p>
+
+            @include('partials.putting-profile', [
+                'shapes' => [
+                    ['label' => 'Blade', 'colour' => 'rgb(148 163 184)', 'axes' => $bladeAxes],
+                    ['label' => 'Mallet', 'colour' => 'rgb(16 185 129)', 'axes' => $malletAxes],
+                ],
+            ])
+        </section>
+    @endif
+
     <section class="mt-6">
         <h2 class="text-sm font-medium text-slate-300">Head to head</h2>
         <div class="mt-2 overflow-hidden rounded-lg bg-slate-900">

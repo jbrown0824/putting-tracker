@@ -7,6 +7,7 @@ use App\Enums\Putter;
 use App\Models\Challenge;
 use App\Models\PuttingSession;
 use App\Services\PutterComparison;
+use App\Services\PuttingProfile;
 use App\Services\PuttStats;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
@@ -30,8 +31,12 @@ class StatsController extends Controller
      */
     private const SELECTABLE_SESSIONS = 50;
 
-    public function index(Request $request, PuttStats $stats, PutterComparison $comparison): View
-    {
+    public function index(
+        Request $request,
+        PuttStats $stats,
+        PutterComparison $comparison,
+        PuttingProfile $profile,
+    ): View {
         $challenge = Challenge::current();
         $session = $this->resolveSession($request);
 
@@ -57,11 +62,13 @@ class StatsController extends Controller
             'dailyVolume' => $challenge !== null ? $stats->dailyVolume($challenge) : collect(),
             'dial' => $scoped->missDial(),
             'speedVsLine' => $scoped->speedVsLine(),
+            'lineMissCauses' => $scoped->lineMissCauses(),
             'byDistance' => $scoped->byDistance(),
             'insideVsOutside' => $scoped->insideVsOutside(),
             'fiftyPercentDistance' => $scoped->fiftyPercentDistance(),
             'insights' => $scoped->insights(),
             'contextBreakdown' => $comparison->contextBreakdown(),
+            'profileAxes' => $profile->build($scoped),
         ]);
     }
 
@@ -77,6 +84,7 @@ class StatsController extends Controller
             'verdict' => $scoped->verdict(),
             'strengths' => $scoped->strengths(),
             'contextBreakdown' => $comparison->contextBreakdown(),
+            'profiles' => $scoped->profiles(),
         ]);
     }
 

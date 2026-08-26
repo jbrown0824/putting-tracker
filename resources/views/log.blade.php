@@ -81,23 +81,60 @@
                     <path d="M120 120 L38.7 38.7 A115 115 0 0 1 201.3 38.7 Z" class="transition-colors"
                           :class="flash === 'miss_long' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_long')" role="button" aria-label="Missed long"/>
-                    <path d="M120 120 L201.3 38.7 A115 115 0 0 1 201.3 201.3 Z" class="transition-colors"
-                          :class="flash === 'miss_right' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
-                          @click="record('miss_right')" role="button" aria-label="Missed right"/>
                     <path d="M120 120 L201.3 201.3 A115 115 0 0 1 38.7 201.3 Z" class="transition-colors"
                           :class="flash === 'miss_short' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
                           @click="record('miss_short')" role="button" aria-label="Missed short"/>
-                    <path d="M120 120 L38.7 201.3 A115 115 0 0 1 38.7 38.7 Z" class="transition-colors"
-                          :class="flash === 'miss_left' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
-                          @click="record('miss_left')" role="button" aria-label="Missed left"/>
+
+                    {{-- Simple: one wedge a side. --}}
+                    <g x-show="! advancedMisses">
+                        <path d="M120 120 L201.3 38.7 A115 115 0 0 1 201.3 201.3 Z" class="transition-colors"
+                              :class="flash === 'miss_right' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_right')" role="button" aria-label="Missed right"/>
+                        <path d="M120 120 L38.7 201.3 A115 115 0 0 1 38.7 38.7 Z" class="transition-colors"
+                              :class="flash === 'miss_left' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_left')" role="button" aria-label="Missed left"/>
+                    </g>
+
+                    {{-- Advanced: each side splits at r=84 into an inner stroke band and an
+                         outer read band, so classifying still costs exactly one tap. --}}
+                    <g x-show="advancedMisses">
+                        <path d="M120 120 L179.4 60.6 A84 84 0 0 1 179.4 179.4 Z" class="transition-colors"
+                              :class="flash === 'miss_right' && flashCause === 'stroke' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_right', 'stroke')" role="button" aria-label="Pushed it right"/>
+                        <path d="M179.4 60.6 L201.3 38.7 A115 115 0 0 1 201.3 201.3 L179.4 179.4 A84 84 0 0 0 179.4 60.6 Z"
+                              class="transition-colors"
+                              :class="flash === 'miss_right' && flashCause === 'read' ? 'fill-sky-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_right', 'read')" role="button" aria-label="Misread the break right"/>
+
+                        <path d="M120 120 L60.6 179.4 A84 84 0 0 1 60.6 60.6 Z" class="transition-colors"
+                              :class="flash === 'miss_left' && flashCause === 'stroke' ? 'fill-slate-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_left', 'stroke')" role="button" aria-label="Pulled it left"/>
+                        <path d="M60.6 179.4 L38.7 201.3 A115 115 0 0 1 38.7 38.7 L60.6 60.6 A84 84 0 0 0 60.6 179.4 Z"
+                              class="transition-colors"
+                              :class="flash === 'miss_left' && flashCause === 'read' ? 'fill-sky-400' : 'fill-slate-800 active:fill-slate-700'"
+                              @click="record('miss_left', 'read')" role="button" aria-label="Misread the break left"/>
+
+                        <path d="M60.6 179.4 A84 84 0 0 1 60.6 60.6" fill="none" class="stroke-slate-950" stroke-width="2"/>
+                        <path d="M179.4 60.6 A84 84 0 0 1 179.4 179.4" fill="none" class="stroke-slate-950" stroke-width="2"/>
+                    </g>
 
                     <line x1="38.7" y1="38.7" x2="201.3" y2="201.3" class="stroke-slate-950" stroke-width="2"/>
                     <line x1="201.3" y1="38.7" x2="38.7" y2="201.3" class="stroke-slate-950" stroke-width="2"/>
 
                     <text x="120" y="34" text-anchor="middle" class="fill-slate-400 text-[13px]">LONG</text>
                     <text x="120" y="214" text-anchor="middle" class="fill-slate-400 text-[13px]">SHORT</text>
-                    <text x="26" y="125" text-anchor="middle" class="fill-slate-400 text-[13px]">LEFT</text>
-                    <text x="214" y="125" text-anchor="middle" class="fill-slate-400 text-[13px]">RIGHT</text>
+
+                    <g x-show="! advancedMisses">
+                        <text x="26" y="125" text-anchor="middle" class="fill-slate-400 text-[13px]">LEFT</text>
+                        <text x="214" y="125" text-anchor="middle" class="fill-slate-400 text-[13px]">RIGHT</text>
+                    </g>
+
+                    <g x-show="advancedMisses">
+                        <text x="20.5" y="123" text-anchor="middle" class="fill-sky-300 text-[9px]">READ</text>
+                        <text x="51" y="123" text-anchor="middle" class="fill-slate-400 text-[9px]">PULL</text>
+                        <text x="189" y="123" text-anchor="middle" class="fill-slate-400 text-[9px]">PUSH</text>
+                        <text x="219.5" y="123" text-anchor="middle" class="fill-sky-300 text-[9px]">READ</text>
+                    </g>
 
                     <circle cx="120" cy="120" r="54" class="fill-slate-950"/>
                     <circle cx="120" cy="120" r="50" @click="record('sunk')" role="button" aria-label="Sunk"
@@ -141,6 +178,26 @@
                 </button>
 
                 <div x-show="advancedOpen" class="mt-3 space-y-3 pb-4">
+                    <div>
+                        <label class="text-[11px] uppercase tracking-wide text-slate-500">Line misses</label>
+                        <div class="mt-1 grid grid-cols-2 gap-1.5">
+                            <button type="button" @click="advancedMisses && toggleAdvancedMisses()"
+                                    class="rounded py-2 text-xs"
+                                    :class="! advancedMisses ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'">
+                                Left / right
+                            </button>
+                            <button type="button" @click="! advancedMisses && toggleAdvancedMisses()"
+                                    class="rounded py-2 text-xs"
+                                    :class="advancedMisses ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50' : 'border border-slate-700 text-slate-400'">
+                                Split pull / read
+                            </button>
+                        </div>
+                        <p class="mt-1 text-[10px] leading-relaxed text-slate-600">
+                            Splits each side of the dial into an inner band for a pull or push and an
+                            outer band for a misread break. Still one tap.
+                        </p>
+                    </div>
+
                     <div>
                         <label class="text-[11px] uppercase tracking-wide text-slate-500">Slope</label>
                         <div class="mt-1 grid grid-cols-4 gap-1.5">

@@ -2,8 +2,10 @@
 
 namespace App\Actions;
 
+use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
+use App\Enums\PuttResult;
 use App\Models\Putt;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +38,8 @@ class RecordPutts
                     ? Putter::from($putt['putter'])
                     : Putter::default();
 
+                $result = PuttResult::from($putt['result']);
+
                 $session = $this->resolveSession->execute($context, $putter, $hitAt, [
                     'location' => $putt['location'] ?? null,
                     'surface' => $putt['surface'] ?? null,
@@ -46,7 +50,8 @@ class RecordPutts
                     [
                         'putting_session_id' => $session->id,
                         'distance_ft' => $putt['distance_ft'],
-                        'result' => $putt['result'],
+                        'result' => $result,
+                        'miss_cause' => $this->resolveMissCause($putt, $result),
                         'context' => $context,
                         'putter' => $putter,
                         'slope' => $putt['slope'] ?? null,
@@ -61,5 +66,21 @@ class RecordPutts
 
             return $stored;
         });
+    }
+
+    /**
+     * A cause is only meaningful on a left or right miss. Anything else is dropped
+     * rather than rejected, so a client that sends a stale one still gets its putt
+     * stored instead of having the whole batch fail validation.
+     *
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolveMissCause(array $putt, PuttResult $result): ?LineMissCause
+    {
+        if (! isset($putt['miss_cause']) || ! LineMissCause::appliesTo($result)) {
+            return null;
+        }
+
+        return LineMissCause::from($putt['miss_cause']);
     }
 }
