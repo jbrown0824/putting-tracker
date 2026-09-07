@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
@@ -362,4 +363,86 @@ it('reports how many line misses were logged without a cause', function () {
     $this->get(route('stats'))
         ->assertOk()
         ->assertSee('7 line misses logged without a cause');
+});
+
+it('shows the clock ring and the position bar on the log screen', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('log'))
+        ->assertOk()
+        ->assertSee('stepClockPosition(1)', false)
+        ->assertSee('setClockPosition(\'above_right\')', false)
+        // The orienting convention has to be on screen, or the data is meaningless.
+        ->assertSee('on the high side', false);
+});
+
+it('renders the log screen before any position has been chosen', function () {
+    Challenge::factory()->create();
+
+    $this->get(route('log'))
+        ->assertOk()
+        ->assertSee('Tap to set position');
+});
+
+it('shows the position heat map once putts carry a position', function () {
+    Challenge::factory()->create();
+    logMakeRate(40, 60, 10, Putter::Blade, PuttContext::Outside, PuttResult::MissShort, ClockPosition::Below);
+    logMakeRate(40, 20, 10, Putter::Blade, PuttContext::Outside, PuttResult::MissShort, ClockPosition::AboveRight);
+
+    $this->get(route('stats', ['context' => PuttContext::Outside->value]))
+        ->assertOk()
+        ->assertSee('Around the hole')
+        ->assertSee('is the high side. Dashed segments');
+});
+
+it('hides the heat map on the day nothing has a position yet', function () {
+    Challenge::factory()->create();
+    logPutts(60, PuttResult::Sunk, 10);
+
+    $this->get(route('stats'))
+        ->assertOk()
+        ->assertDontSee('Around the hole');
+});
+
+it('says untagged putts are unclassified rather than flat', function () {
+    Challenge::factory()->create();
+    logPutts(40, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Blade, ClockPosition::Below);
+    logPutts(25, PuttResult::MissShort, 10, PuttContext::Outside);
+
+    $this->get(route('stats', ['context' => PuttContext::Outside->value]))
+        ->assertOk()
+        ->assertSee('they are unclassified, not flat');
+});
+
+it('shows the levelled make rate alongside the raw one', function () {
+    Challenge::factory()->create();
+    logMakeRate(120, 80, 3, Putter::Blade);
+    logMakeRate(120, 45, 10, Putter::Blade);
+    logMakeRate(120, 20, 20, Putter::Blade);
+
+    $this->get(route('stats', ['putter' => Putter::Blade->value]))
+        ->assertOk()
+        ->assertSee('Make rate, levelled')
+        ->assertSee('Levelled');
+});
+
+it('shows the levelled row on the compare page', function () {
+    Challenge::factory()->create();
+    logMakeRate(150, 80, 3, Putter::Blade);
+    logMakeRate(150, 50, 10, Putter::Blade);
+    logMakeRate(320, 66, 3, Putter::Mallet);
+    logMakeRate(70, 32, 10, Putter::Mallet);
+
+    $this->get(route('stats.compare'))
+        ->assertOk()
+        ->assertSee('Levelled')
+        ->assertSee('that is the row the verdict is based on');
+});
+
+it('renders the compare page when neither putter has a position yet', function () {
+    Challenge::factory()->create();
+    logMakeRate(60, 50, 10, Putter::Blade);
+    logMakeRate(60, 50, 10, Putter::Mallet);
+
+    $this->get(route('stats.compare'))->assertOk();
 });

@@ -1,7 +1,9 @@
 <?php
 
 use App\Actions\ResolvePuttingSession;
+use App\Enums\ClockPosition;
 use App\Enums\Putter;
+use App\Enums\PuttSlope;
 use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
@@ -146,4 +148,80 @@ it('starts a new session when the putter changes mid-practice', function () {
 
     expect(PuttingSession::count())->toBe(2)
         ->and(PuttingSession::pluck('putter')->all())->toEqualCanonicalizing([Putter::Blade, Putter::Mallet]);
+});
+
+it('stores the clock position and derives the slope from it', function () {
+    Challenge::factory()->create();
+
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['clock_position' => 'above_right'])],
+    ])->assertOk();
+
+    $putt = Putt::first();
+
+    expect($putt->clock_position)->toBe(ClockPosition::AboveRight)
+        // Never sent by the client — the position already fixes it.
+        ->and($putt->slope)->toBe(PuttSlope::Downhill);
+});
+
+it('stores a putt with no position rather than failing validation', function () {
+    Challenge::factory()->create();
+
+    // A phone running a bundle from before the ring shipped.
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload()],
+    ])->assertOk();
+
+    expect(Putt::first()->clock_position)->toBeNull();
+});
+
+it('keeps a stale client\'s own slope when it sends no position', function () {
+    Challenge::factory()->create();
+
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['slope' => 'uphill'])],
+    ])->assertOk();
+
+    expect(Putt::first()->slope)->toBe(PuttSlope::Uphill)
+        ->and(Putt::first()->clock_position)->toBeNull();
+});
+
+it('lets the position override a slope the client also sent', function () {
+    Challenge::factory()->create();
+
+    // The two contradict each other; the position is the richer datum and wins.
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['slope' => 'uphill', 'clock_position' => 'above'])],
+    ])->assertOk();
+
+    expect(Putt::first()->slope)->toBe(PuttSlope::Downhill);
+});
+
+it('rejects an unknown clock position', function () {
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['clock_position' => 'half_past_three'])],
+    ])->assertJsonValidationErrorFor('putts.0.clock_position');
+});
+
+it('converts a stale client\'s slope and break into a position', function () {
+    Challenge::factory()->create();
+
+    // A phone running a bundle from before the ring existed. Its putts still land
+    // classified rather than falling into the unclassified bucket.
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['slope' => 'uphill', 'break_direction' => 'right_to_left'])],
+    ])->assertOk();
+
+    expect(Putt::first()->clock_position)->toBe(ClockPosition::BelowRight);
+});
+
+it('leaves a stale putt unclassified when it sent a break but no slope', function () {
+    Challenge::factory()->create();
+
+    // Three positions break right to left; picking one would be inventing data.
+    $this->postJson(route('api.putts.sync'), [
+        'putts' => [puttPayload(['break_direction' => 'right_to_left'])],
+    ])->assertOk();
+
+    expect(Putt::first()->clock_position)->toBeNull();
 });

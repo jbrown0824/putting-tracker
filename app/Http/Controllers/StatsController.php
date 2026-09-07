@@ -6,6 +6,7 @@ use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Models\Challenge;
 use App\Models\PuttingSession;
+use App\Services\AdjustedRate;
 use App\Services\PutterComparison;
 use App\Services\PuttingProfile;
 use App\Services\PuttStats;
@@ -36,6 +37,7 @@ class StatsController extends Controller
         PuttStats $stats,
         PutterComparison $comparison,
         PuttingProfile $profile,
+        AdjustedRate $adjusted,
     ): View {
         $challenge = Challenge::current();
         $session = $this->resolveSession($request);
@@ -69,6 +71,15 @@ class StatsController extends Controller
             'insights' => $scoped->insights(),
             'contextBreakdown' => $comparison->contextBreakdown(),
             'profileAxes' => $profile->build($scoped),
+            'clockPositions' => $scoped->byClockPosition(),
+            // Levelled against every putt in the same context, so the number shown
+            // for the blade means the same thing as the number shown for the mallet.
+            //
+            // The reference follows the context filter rather than always being the
+            // whole dataset: an outside-only scope shares no strata with a reference
+            // dominated by indoor putts, so coverage would never clear its threshold
+            // and the card would simply never appear on a filtered page.
+            'adjusted' => $adjusted->standardised($scoped, $stats->inContext($session?->context ?? $context)),
         ]);
     }
 
@@ -85,6 +96,7 @@ class StatsController extends Controller
             'strengths' => $scoped->strengths(),
             'contextBreakdown' => $comparison->contextBreakdown(),
             'profiles' => $scoped->profiles(),
+            'matchedRates' => $scoped->matchedRates(),
         ]);
     }
 

@@ -41,13 +41,15 @@ function csrf() {
     return document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 }
 
-Alpine.data('puttTracker', (initialProgress, ladder) => ({
+Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
     ladder,
+    clockRing: clock.ring,
+    clockLabels: clock.labels,
     distance: 10,
     context: 'inside',
     putter: 'blade',
-    slope: null,
-    breakDirection: null,
+    clockPosition: 'flat',
+    ringOpen: false,
     location: '',
     surface: '',
     advancedOpen: false,
@@ -68,8 +70,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
         this.distance = prefs.distance ?? 10;
         this.context = prefs.context ?? 'inside';
         this.putter = prefs.putter ?? 'blade';
-        this.slope = prefs.slope ?? null;
-        this.breakDirection = prefs.breakDirection ?? null;
+        this.clockPosition = prefs.clockPosition ?? 'flat';
         this.advancedMisses = prefs.advancedMisses ?? false;
         this.location = prefs.location ?? '';
         this.surface = prefs.surface ?? '';
@@ -131,8 +132,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
             distance: this.distance,
             context: this.context,
             putter: this.putter,
-            slope: this.slope,
-            breakDirection: this.breakDirection,
+            clockPosition: this.clockPosition,
             advancedMisses: this.advancedMisses,
             location: this.location,
             surface: this.surface,
@@ -140,7 +140,45 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
     },
 
     setContext(context) {
+        // "Flat" is a claim about the surface, and it is only reliably true of the
+        // indoor mat. Stepping outside retires the claim rather than carrying it
+        // silently onto a green that has a fall line — the bar then prompts for a
+        // real position instead of quietly mislabelling every putt.
+        if (context === 'outside' && this.clockPosition === 'flat') {
+            this.clockPosition = null;
+        } else if (context === 'inside' && this.clockPosition === null) {
+            this.clockPosition = 'flat';
+        }
+
         this.context = context;
+        this.savePrefs();
+    },
+
+    get clockLabel() {
+        return this.clockLabels[this.clockPosition]?.clock ?? '';
+    },
+
+    get clockDetail() {
+        return this.clockLabels[this.clockPosition]?.detail ?? '';
+    },
+
+    setClockPosition(position) {
+        this.clockPosition = position;
+        this.ringOpen = false;
+        this.savePrefs();
+    },
+
+    /**
+     * Walk round the hole. Stepping from flat or from nothing enters the ring at
+     * twelve rather than refusing to move.
+     */
+    stepClockPosition(direction) {
+        const index = this.clockRing.indexOf(this.clockPosition);
+
+        this.clockPosition = index === -1
+            ? this.clockRing[0]
+            : this.clockRing[(index + direction + this.clockRing.length) % this.clockRing.length];
+
         this.savePrefs();
     },
 
@@ -198,8 +236,7 @@ Alpine.data('puttTracker', (initialProgress, ladder) => ({
             miss_cause: cause,
             context: this.context,
             putter: this.putter,
-            slope: this.slope || null,
-            break_direction: this.breakDirection || null,
+            clock_position: this.clockPosition || null,
             location: this.location || null,
             surface: this.surface || null,
             hit_at: new Date().toISOString(),

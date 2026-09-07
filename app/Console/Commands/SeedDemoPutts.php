@@ -10,7 +10,8 @@ class SeedDemoPutts extends Command
     protected $signature = 'putts:demo
         {--days=14 : How many days of practice to generate}
         {--profile= : lag, charger, puller, pusher, elite, struggling, or random}
-        {--keep-window : Leave the challenge start date untouched}';
+        {--keep-window : Leave the challenge start date untouched}
+        {--fresh : Required to delete putts that already exist}';
 
     protected $description = 'Replace all putts with a fresh random dataset for testing the stats page';
 
@@ -21,9 +22,14 @@ class SeedDemoPutts extends Command
                 days: max(1, (int) $this->option('days')),
                 profileName: $this->option('profile'),
                 alignChallengeWindow: ! $this->option('keep-window'),
+                replaceExisting: (bool) $this->option('fresh'),
             );
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
+            return self::FAILURE;
+        } catch (\RuntimeException $e) {
+            $this->components->error($e->getMessage());
 
             return self::FAILURE;
         }

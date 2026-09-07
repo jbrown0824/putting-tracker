@@ -27,10 +27,22 @@ it('replaces the previous dataset instead of appending', function () {
     $generate = app(GenerateDemoPutts::class);
 
     $first = $generate->execute(days: 4, profileName: 'lag');
-    $second = $generate->execute(days: 4, profileName: 'lag');
+    $second = $generate->execute(days: 4, profileName: 'lag', replaceExisting: true);
 
     expect(Putt::count())->toBe($second['putts'])
         ->and(Putt::count())->not->toBe($first['putts'] + $second['putts']);
+});
+
+it('refuses to delete existing putts unless asked to replace them', function () {
+    Challenge::factory()->create();
+    $generate = app(GenerateDemoPutts::class);
+
+    $generate->execute(days: 4, profileName: 'lag');
+    $before = Putt::count();
+
+    expect(fn () => $generate->execute(days: 4, profileName: 'lag'))
+        ->toThrow(RuntimeException::class)
+        ->and(Putt::count())->toBe($before);
 });
 
 it('gives the lag profile a short-miss bias', function () {

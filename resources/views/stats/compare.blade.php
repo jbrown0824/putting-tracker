@@ -73,9 +73,20 @@
             </div>
 
             @php
+                $bladeAdjusted = $matchedRates['scopes']['blade'];
+                $malletAdjusted = $matchedRates['scopes']['mallet'];
+
                 $rows = [
                     ['Putts', $blade['attempts'], $mallet['attempts'], false],
                     ['Make rate', $blade['make_percent'].'%', $mallet['make_percent'].'%', true],
+                    // The row that actually settles it: the same two putters over the
+                    // same mix of putts, rather than over whatever each happened to face.
+                    ...($bladeAdjusted['reliable'] ? [[
+                        'Levelled',
+                        $bladeAdjusted['adjusted_percent'].'%',
+                        $malletAdjusted['adjusted_percent'].'%',
+                        true,
+                    ]] : []),
                     // Splitting by context is meaningless once the page is filtered to one.
                     ...($context !== null ? [] : [
                         ['Inside', $blade['inside']['make_percent'].'%', $mallet['inside']['make_percent'].'%', true],
@@ -100,8 +111,15 @@
                 </div>
             @endforeach
         </div>
-        <p class="mt-1 text-[11px] text-slate-600">
-            Raw totals{{ $context !== null ? ' for '.strtolower($context->label()).' putts' : '' }} — they include distances only one putter has played, which is why the verdict above uses matched distances instead.
+        <p class="mt-1 text-[11px] leading-relaxed text-slate-600">
+            Raw totals{{ $context !== null ? ' for '.strtolower($context->label()).' putts' : '' }} include putts only one putter has played.
+            @if ($bladeAdjusted['reliable'])
+                The levelled row puts both over the same mix, matched on
+                {{ \App\Services\AdjustedRate::describeDimensions($matchedRates['dimensions']) }} across {{ $matchedRates['sample'] }} putts in
+                {{ $matchedRates['cells'] }} groups — that is the row the verdict is based on.
+            @else
+                There is not yet enough overlap between the two to level them against a shared mix.
+            @endif
         </p>
     </section>
 

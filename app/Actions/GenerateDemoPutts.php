@@ -2,10 +2,12 @@
 
 namespace App\Actions;
 
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
+use App\Enums\PuttSlope;
 use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
@@ -58,16 +60,58 @@ class GenerateDemoPutts
     private const BLADE_SESSION_SHARE = 55;
 
     /**
+     * How much easier or harder each band is, as a multiplier on the half-distance.
+     * Below 1 pulls the make-rate curve in and makes the position harder.
+     *
+     * Ordered the way real putts behave: downhill sidehill is the hardest putt in
+     * golf because speed and break compound, and straight uphill is the most
+     * forgiving because pace covers a multitude of sins.
+     *
+     * @var array<string, float>
+     */
+    private const POSITION_DIFFICULTY = [
+        'straight_downhill' => 0.82,
+        'downhill_sidehill' => 0.68,
+        'sidehill' => 0.88,
+        'uphill_sidehill' => 1.06,
+        'straight_uphill' => 1.12,
+        'flat' => 1.0,
+    ];
+
+    /**
+     * Share of indoor spots played on the flat. A mat has no fall line, so almost
+     * every indoor putt is genuinely flat rather than merely untagged.
+     */
+    private const INDOOR_FLAT_SHARE = 88;
+
+    /**
      * Wipe existing putts and generate a fresh random dataset.
      *
+     * Nothing on a putt says whether a human or this seeder logged it, so the
+     * guard cannot be selective: it refuses to delete anything at all unless the
+     * caller has explicitly asked for a replacement. This command has destroyed a
+     * real practice session once already, and an accidental reseed is not
+     * recoverable.
+     *
      * @return array<string, mixed> a summary of what was generated
+     *
+     * @throws \RuntimeException when putts already exist and no replacement was asked for
      */
     public function execute(
         int $days = 14,
         ?string $profileName = null,
         bool $alignChallengeWindow = true,
+        bool $replaceExisting = false,
     ): array {
         $profile = $this->resolveProfile($profileName);
+        $existing = Putt::query()->count();
+
+        if ($existing > 0 && ! $replaceExisting) {
+            throw new \RuntimeException(sprintf(
+                'There are already %d putts logged. Seeding deletes every one of them, including any you hit yourself. Pass --fresh if that is really what you want.',
+                $existing,
+            ));
+        }
 
         Putt::query()->delete();
         PuttingSession::query()->delete();
@@ -104,8 +148,25 @@ class GenerateDemoPutts
                 $perPutter[$putter->value] += $volume;
                 $putterProfile = $this->applyPutterModifier($profile, $putter);
 
-                for ($i = 0; $i < $volume; $i++) {
-                    $rows[] = $this->buildPutt($session, $context, $putter, $startedAt->copy()->addSeconds($i * 35), $putterProfile);
+                // Practice happens in spots: you stand somewhere, hit a handful, then
+                // move. Rolling a position per putt would scatter them in a way no
+                // one actually putts, and would make every position look identical.
+                $logged = 0;
+
+                while ($logged < $volume) {
+                    $spot = $this->rollSpot($context);
+                    $run = min($volume - $logged, mt_rand(3, 8));
+
+                    for ($i = 0; $i < $run; $i++, $logged++) {
+                        $rows[] = $this->buildPutt(
+                            $session,
+                            $context,
+                            $putter,
+                            $spot,
+                            $startedAt->copy()->addSeconds($logged * 35),
+                            $putterProfile,
+                        );
+                    }
                 }
             }
         }
@@ -199,10 +260,11 @@ class GenerateDemoPutts
      * @param  array<string, mixed>  $profile
      * @return array<string, mixed>
      */
-    private function buildPutt(PuttingSession $session, PuttContext $context, Putter $putter, Carbon $hitAt, array $profile): array
+    private function buildPutt(PuttingSession $session, PuttContext $context, Putter $putter, array $spot, Carbon $hitAt, array $profile): array
     {
-        $distance = self::LADDER[array_rand(self::LADDER)];
-        $result = $this->rollResult($distance, $context, $profile);
+        $distance = $spot['distance'];
+        $position = $spot['position'];
+        $result = $this->rollResult($distance, $context, $position, $profile);
 
         return [
             'uuid' => (string) Str::uuid(),
@@ -212,8 +274,10 @@ class GenerateDemoPutts
             'miss_cause' => $this->rollMissCause($result, $context, $profile)?->value,
             'context' => $context->value,
             'putter' => $putter->value,
-            'slope' => mt_rand(1, 100) <= 40 ? $this->randomSlope() : null,
-            'break_direction' => null,
+            // Derived rather than rolled, exactly as RecordPutts derives it, so the
+            // seeded data cannot contradict itself.
+            'slope' => $position->slope()->value,
+            'clock_position' => $position->value,
             'notes' => null,
             'hit_at' => $hitAt->toDateTimeString(),
             'created_at' => $hitAt->toDateTimeString(),
@@ -231,13 +295,15 @@ class GenerateDemoPutts
      *
      * @param  array<string, mixed>  $profile
      */
-    private function rollResult(int $distance, PuttContext $context, array $profile): PuttResult
+    private function rollResult(int $distance, PuttContext $context, ClockPosition $position, array $profile): PuttResult
     {
         $halfDistance = $profile['skill'] / 12;
 
         if ($context === PuttContext::Outside) {
             $halfDistance *= 1 - ($profile['outdoor_penalty'] / 100);
         }
+
+        $halfDistance *= self::POSITION_DIFFICULTY[$position->difficultyBand()];
 
         $makeChance = 100 / (1 + ($distance / max(1.5, $halfDistance)) ** $profile['decay']);
 
@@ -252,8 +318,10 @@ class GenerateDemoPutts
             return PuttResult::LipOut;
         }
 
-        // Longer putts fail on speed more often than on line.
-        $speedShare = min(0.9, $profile['speed_share'] + ($distance * 0.012));
+        // Longer putts fail on speed more often than on line, and so do downhill
+        // ones — pace is the thing a slope takes away from you first.
+        $downhill = $position->slope() === PuttSlope::Downhill ? 0.12 : 0.0;
+        $speedShare = min(0.9, $profile['speed_share'] + ($distance * 0.012) + $downhill);
 
         if (mt_rand(0, 100) / 100 < $speedShare) {
             $shortChance = 0.5 - ($profile['speed_tendency'] * 0.42);
@@ -290,9 +358,28 @@ class GenerateDemoPutts
         return mt_rand(0, 10000) / 10000 < $readShare ? LineMissCause::Read : LineMissCause::Stroke;
     }
 
-    private function randomSlope(): string
+    /**
+     * A spot to putt from: one distance and one position, held for a run of putts.
+     *
+     * @return array{distance: int, position: ClockPosition}
+     */
+    private function rollSpot(PuttContext $context): array
     {
-        return ['uphill', 'downhill', 'flat'][array_rand(['uphill', 'downhill', 'flat'])];
+        return [
+            'distance' => self::LADDER[array_rand(self::LADDER)],
+            'position' => $this->rollPosition($context),
+        ];
+    }
+
+    private function rollPosition(PuttContext $context): ClockPosition
+    {
+        if ($context === PuttContext::Inside && mt_rand(1, 100) <= self::INDOOR_FLAT_SHARE) {
+            return ClockPosition::Flat;
+        }
+
+        $ring = ClockPosition::ring();
+
+        return $ring[array_rand($ring)];
     }
 
     private function randomLocation(): string

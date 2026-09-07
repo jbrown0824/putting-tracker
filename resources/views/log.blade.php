@@ -3,7 +3,20 @@
 @section('title', 'Log putts')
 
 @php
+    use App\Enums\ClockPosition;
+
     $ladder = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40];
+
+    /** Handed to Alpine so the enum stays the only place the ring order and the
+        labels are defined. */
+    $clock = [
+        'ring' => array_map(fn (ClockPosition $p): string => $p->value, ClockPosition::ring()),
+        'labels' => collect(ClockPosition::cases())
+            ->mapWithKeys(fn (ClockPosition $p): array => [
+                $p->value => ['clock' => $p->clockLabel(), 'detail' => $p->label()],
+            ])
+            ->all(),
+    ];
 @endphp
 
 @section('content')
@@ -12,7 +25,7 @@
             No challenge configured. Run <code>php artisan db:seed</code> to create one.
         </p>
     @else
-        <div x-data="puttTracker(@js($progress), @js($ladder))" x-cloak>
+        <div x-data="puttTracker(@js($progress), @js($ladder), @js($clock))" x-cloak>
             <div class="flex items-baseline justify-between text-xs text-slate-400">
                 <span><span class="font-medium text-slate-100" x-text="progress.total"></span> / {{ $challenge->target_total }}</span>
                 <span>outside <span class="font-medium text-slate-100" x-text="progress.outside"></span> / {{ $challenge->target_outside_min }}</span>
@@ -56,6 +69,32 @@
                     Outside
                 </button>
             </div>
+
+            {{-- Where you are standing, not a property of the individual putt: set it
+                 once and it rides along with every putt until you move. The arrows
+                 walk round the hole for an around-the-world drill. --}}
+            <div class="mt-2 flex items-center gap-1.5">
+                <button type="button" @click="stepClockPosition(-1)" aria-label="Previous position"
+                        class="flex h-10 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-800 text-slate-400 active:bg-slate-800">‹</button>
+
+                <button type="button" @click="ringOpen = ! ringOpen"
+                        class="flex h-10 flex-1 flex-col items-center justify-center rounded-lg transition"
+                        :class="clockPosition ? 'border border-slate-800' : 'bg-amber-500/10 ring-1 ring-amber-500/40'">
+                    <span class="text-xs font-medium"
+                          :class="clockPosition ? 'text-slate-200' : 'text-amber-300'"
+                          x-text="clockPosition ? clockLabel : 'Tap to set position'"></span>
+                    {{-- Flat's two labels are the same word, so the second line would
+                         just repeat it. --}}
+                    <span class="text-[10px] text-slate-500"
+                          x-show="clockPosition && clockDetail !== clockLabel"
+                          x-text="clockDetail"></span>
+                </button>
+
+                <button type="button" @click="stepClockPosition(1)" aria-label="Next position"
+                        class="flex h-10 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-800 text-slate-400 active:bg-slate-800">›</button>
+            </div>
+
+            @include('partials.clock-ring')
 
             <div class="mt-4 flex items-center justify-between">
                 <button type="button" @click="stepDistance(-1)" aria-label="Shorter"
@@ -196,30 +235,6 @@
                             Splits each side of the dial into an inner band for a pull or push and an
                             outer band for a misread break. Still one tap.
                         </p>
-                    </div>
-
-                    <div>
-                        <label class="text-[11px] uppercase tracking-wide text-slate-500">Slope</label>
-                        <div class="mt-1 grid grid-cols-4 gap-1.5">
-                            <template x-for="option in [null, 'uphill', 'downhill', 'flat']" :key="option ?? 'none'">
-                                <button type="button" @click="slope = option; savePrefs()"
-                                        class="rounded py-2 text-xs capitalize"
-                                        :class="slope === option ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'"
-                                        x-text="option ?? 'None'"></button>
-                            </template>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="text-[11px] uppercase tracking-wide text-slate-500">Break</label>
-                        <div class="mt-1 grid grid-cols-4 gap-1.5">
-                            <template x-for="option in [null, 'left_to_right', 'right_to_left', 'straight']" :key="option ?? 'none'">
-                                <button type="button" @click="breakDirection = option; savePrefs()"
-                                        class="rounded py-2 text-[11px]"
-                                        :class="breakDirection === option ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'"
-                                        x-text="option ? option.replace(/_/g, ' ').replace('left to right', 'L→R').replace('right to left', 'R→L') : 'None'"></button>
-                            </template>
-                        </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2">

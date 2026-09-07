@@ -185,6 +185,30 @@ class PuttingProfile
     }
 
     /**
+     * Which distance band a putt falls in. Public so the whole app bands distance
+     * the same way — anything that invents its own buckets stops being comparable
+     * with the radar.
+     */
+    public static function bandFor(int $feet): string
+    {
+        foreach (self::BANDS as $key => $band) {
+            if ($feet >= $band['min'] && $feet <= $band['max']) {
+                return $key;
+            }
+        }
+
+        return array_key_last(self::BANDS);
+    }
+
+    /**
+     * @return array<string, array{label: string, note: string, min: int, max: int}>
+     */
+    public static function bands(): array
+    {
+        return self::BANDS;
+    }
+
+    /**
      * The make rate the reference putter manages from a given distance.
      */
     public function referenceMakeRate(float $feet): float

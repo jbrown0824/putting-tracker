@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ClockPosition;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
@@ -59,6 +60,7 @@ function logPutts(
     int $distance,
     PuttContext $context = PuttContext::Inside,
     Putter $putter = Putter::Blade,
+    ?ClockPosition $position = null,
 ): void {
     $session = PuttingSession::factory()->create([
         'context' => $context,
@@ -71,6 +73,9 @@ function logPutts(
         'distance_ft' => $distance,
         'context' => $context,
         'putter' => $putter,
+        // Null by default, matching every putt logged before positions existed.
+        'clock_position' => $position,
+        'slope' => $position?->slope(),
         'hit_at' => Carbon::now(),
     ]);
 }
@@ -86,14 +91,15 @@ function logMakeRate(
     Putter $putter,
     PuttContext $context = PuttContext::Inside,
     PuttResult $miss = PuttResult::MissShort,
+    ?ClockPosition $position = null,
 ): void {
     $made = (int) round($attempts * $makePercent / 100);
 
     if ($made > 0) {
-        logPutts($made, PuttResult::Sunk, $distance, $context, $putter);
+        logPutts($made, PuttResult::Sunk, $distance, $context, $putter, $position);
     }
 
     if ($attempts - $made > 0) {
-        logPutts($attempts - $made, $miss, $distance, $context, $putter);
+        logPutts($attempts - $made, $miss, $distance, $context, $putter, $position);
     }
 }

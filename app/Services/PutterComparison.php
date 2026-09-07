@@ -36,9 +36,16 @@ class PutterComparison
     /** @var Collection<int, array<string, mixed>>|null */
     private ?Collection $byDistance = null;
 
+    /** @var array<string, mixed>|null */
+    private ?array $matched = null;
+
     private ?PuttContext $context = null;
 
-    public function __construct(private PuttStats $stats, private PuttingProfile $profile) {}
+    public function __construct(
+        private PuttStats $stats,
+        private PuttingProfile $profile,
+        private AdjustedRate $adjusted,
+    ) {}
 
     /**
      * Each putter's radar profile, for overlaying one shape on the other.
@@ -196,24 +203,46 @@ class PutterComparison
     }
 
     /**
+     * Both putters' raw and mix-levelled make rates over the strata they share.
+     *
+     * Exposed as well as used by the verdict, because seeing the raw figure move
+     * when it is levelled is the clearest possible answer to "is this putter
+     * actually better, or did it just get the easier putts?".
+     *
+     * @return array<string, mixed>
+     */
+    public function matchedRates(): array
+    {
+        return $this->matched ??= $this->adjusted->matched([
+            'blade' => $this->scopedStats(Putter::Blade),
+            'mallet' => $this->scopedStats(Putter::Mallet),
+        ]);
+    }
+
+    /**
      * Which putter to keep in the bag, or an honest refusal to call it.
      *
-     * The matched rates are pooled across distances weighted by the shared sample
-     * size, then compared with a two-proportion z-test. That is a Mantel-Haenszel
-     * style approximation rather than an exact stratified test — close enough to
-     * stop the page recommending a putter on a handful of lucky putts, which is the
-     * only job it has here.
+     * The rates are standardised by AdjustedRate before they are compared, so the
+     * two putters are measured over the same mix of putts rather than over whatever
+     * each happened to face. Without that, hitting more short putts with one putter
+     * is enough to win it the recommendation.
+     *
+     * The standardised rates are then compared with a two-proportion z-test. That is
+     * a Mantel-Haenszel style approximation rather than an exact stratified test —
+     * close enough to stop the page recommending a putter on a handful of lucky
+     * putts, which is the only job it has here.
      *
      * @return array<string, mixed>
      */
     public function verdict(): array
     {
-        $matched = $this->byDistance();
         $headline = $this->headline();
 
         $bladeAttempts = $headline[Putter::Blade->value]['attempts'];
         $malletAttempts = $headline[Putter::Mallet->value]['attempts'];
-        $sample = (int) $matched->sum('weight');
+
+        $matched = $this->matchedRates();
+        $sample = $matched['sample'];
 
         $shortfall = $this->shortfall($bladeAttempts, $malletAttempts, $sample);
 
@@ -221,8 +250,8 @@ class PutterComparison
             return $shortfall;
         }
 
-        $bladeRate = $this->matchedRate($matched, 'blade_percent');
-        $malletRate = $this->matchedRate($matched, 'mallet_percent');
+        $bladeRate = $matched['scopes']['blade']['adjusted_percent'];
+        $malletRate = $matched['scopes']['mallet']['adjusted_percent'];
         $gap = round($malletRate - $bladeRate, 1);
         $leader = $gap >= 0 ? Putter::Mallet : Putter::Blade;
         $z = $this->zScore($bladeRate, $malletRate, $sample);
@@ -236,9 +265,11 @@ class PutterComparison
                 'gap' => $gap,
                 'sample' => $sample,
                 'z' => round($z, 2),
+                'matched_on' => $matched['dimensions'],
                 'message' => sprintf(
-                    'Too close to call. Across %d matched putts the %s is ahead by just %s points, which is inside the noise — play whichever you prefer.',
+                    'Too close to call. Across %d putts matched on %s, the %s is ahead by just %s points, which is inside the noise — play whichever you prefer.',
                     $sample,
+                    AdjustedRate::describeDimensions($matched['dimensions']),
                     strtolower($leader->label()),
                     abs($gap),
                 ),
@@ -253,9 +284,11 @@ class PutterComparison
             'gap' => $gap,
             'sample' => $sample,
             'z' => round($z, 2),
+            'matched_on' => $matched['dimensions'],
             'message' => sprintf(
-                'Play the %s. At the distances you have hit with both, it makes %s%% against the %s\'s %s%% — %s points better over %d matched putts, which is more than chance explains.',
+                'Play the %s. Levelled for %s so both face the same mix, it makes %s%% against the %s\'s %s%% — %s points better over %d matched putts, which is more than chance explains.',
                 strtolower($leader->label()),
+                AdjustedRate::describeDimensions($matched['dimensions']),
                 $leader === Putter::Mallet ? $malletRate : $bladeRate,
                 strtolower($leader->other()->label()),
                 $leader === Putter::Mallet ? $bladeRate : $malletRate,

@@ -2,24 +2,42 @@
 
 namespace App\Services;
 
+use App\Enums\BreakSide;
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
+use App\Enums\PuttSlope;
 use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class PuttStats
 {
+    /**
+     * A position rollup needs this many putts before it is allowed to make a claim.
+     */
+    private const MIN_POSITION_SAMPLE = 20;
+
+    /**
+     * And the two sides have to differ by this many points, or the "gap" is noise.
+     */
+    private const MIN_POSITION_GAP = 8.0;
+
     private ?Putter $putter = null;
 
     private ?PuttContext $context = null;
 
     private ?int $sessionId = null;
+
+    private ?ClockPosition $position = null;
+
+    private ?PuttSlope $slope = null;
 
     /**
      * A copy of this service that only ever sees one putter's putts. Passing null
@@ -58,6 +76,34 @@ class PuttStats
     {
         $clone = clone $this;
         $clone->sessionId = $session?->id;
+
+        return $clone;
+    }
+
+    /**
+     * A copy narrowed to one position on the clock. Passing null returns an
+     * unscoped copy.
+     *
+     * Putts logged before the ring existed carry no position, so a scoped copy
+     * never sees them. That is deliberate: they are unclassified, not flat.
+     */
+    public function atPosition(?ClockPosition $position): self
+    {
+        $clone = clone $this;
+        $clone->position = $position;
+
+        return $clone;
+    }
+
+    /**
+     * A copy narrowed to uphill, downhill or flat putts. Coarser than
+     * atPosition(), and it reaches the older putts that were slope-tagged by hand
+     * before the ring replaced that input.
+     */
+    public function onSlope(?PuttSlope $slope): self
+    {
+        $clone = clone $this;
+        $clone->slope = $slope;
 
         return $clone;
     }
@@ -225,6 +271,110 @@ class PuttStats
             'read_percent' => $this->percent($read, $classified),
             'by_context' => $byContext,
         ];
+    }
+
+    /**
+     * Raw attempt and make counts split by every dimension the adjusted rate can
+     * stratify on, for AdjustedRate to bucket in PHP.
+     *
+     * Grouped by exact distance rather than by band, so the caller decides how
+     * coarsely to bucket without needing a second query. Grouping happens in PHP
+     * downstream for the same portability reason as dailyVolume().
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function cellCounts(): Collection
+    {
+        return $this->baseQuery()
+            ->selectRaw('distance_ft, context, slope')
+            ->selectRaw($this->countCase(PuttResult::Sunk, 'sunk'))
+            ->selectRaw('count(*) as attempts')
+            ->groupBy('distance_ft', 'context', 'slope')
+            ->get()
+            ->map(fn ($row): array => [
+                'distance_ft' => (int) $row->distance_ft,
+                'context' => $row->context instanceof PuttContext ? $row->context->value : (string) $row->context,
+                'slope' => $row->slope instanceof PuttSlope ? $row->slope->value : ($row->slope === null ? null : (string) $row->slope),
+                'attempts' => (int) $row->attempts,
+                'sunk' => (int) $row->sunk,
+            ]);
+    }
+
+    /**
+     * Make rate at each position around the hole, plus the rollups that pool the
+     * mirrored halves of the clock back together.
+     *
+     * Putts logged before the ring existed are counted as unclassified rather than
+     * dropped, so a thin sample is visible as a thin sample instead of looking like
+     * a position nobody ever putts from.
+     *
+     * @return array<string, mixed>
+     */
+    public function byClockPosition(): array
+    {
+        $rows = $this->baseQuery()
+            ->selectRaw('clock_position')
+            ->selectRaw($this->countCase(PuttResult::Sunk, 'sunk'))
+            ->selectRaw('count(*) as attempts')
+            ->groupBy('clock_position')
+            ->get();
+
+        $unclassified = (int) $rows->whereNull('clock_position')->sum('attempts');
+        $positions = [];
+
+        foreach (ClockPosition::cases() as $position) {
+            $row = $rows->firstWhere('clock_position', $position->value);
+            $attempts = (int) ($row->attempts ?? 0);
+            $sunk = (int) ($row->sunk ?? 0);
+
+            $positions[$position->value] = [
+                'position' => $position,
+                'label' => $position->label(),
+                'clock_label' => $position->clockLabel(),
+                'attempts' => $attempts,
+                'sunk' => $sunk,
+                'make_percent' => $this->percent($sunk, $attempts),
+            ];
+        }
+
+        $classified = array_sum(array_column($positions, 'attempts'));
+
+        return [
+            'positions' => $positions,
+            'bands' => $this->rollUp($positions, fn (ClockPosition $p): string => $p->difficultyBand(), fn (ClockPosition $p): string => $p->bandLabel()),
+            'slopes' => $this->rollUp($positions, fn (ClockPosition $p): string => $p->slope()->value, fn (ClockPosition $p): string => $p->slope()->label()),
+            'breaks' => $this->rollUp($positions, fn (ClockPosition $p): string => $p->breakSide()->value, fn (ClockPosition $p): string => $p->breakSide()->shortLabel()),
+            'classified' => $classified,
+            'unclassified' => $unclassified,
+        ];
+    }
+
+    /**
+     * Pool the per-position counts into a coarser grouping, keeping the make rate
+     * a true rate over the pooled attempts rather than an average of averages.
+     *
+     * @param  array<string, array<string, mixed>>  $positions
+     * @param  callable(ClockPosition): string  $key
+     * @param  callable(ClockPosition): string  $label
+     * @return array<string, array<string, mixed>>
+     */
+    private function rollUp(array $positions, callable $key, callable $label): array
+    {
+        $grouped = [];
+
+        foreach ($positions as $row) {
+            $group = $key($row['position']);
+
+            $grouped[$group] ??= ['label' => $label($row['position']), 'attempts' => 0, 'sunk' => 0];
+            $grouped[$group]['attempts'] += $row['attempts'];
+            $grouped[$group]['sunk'] += $row['sunk'];
+        }
+
+        foreach ($grouped as $group => $row) {
+            $grouped[$group]['make_percent'] = $this->percent($row['sunk'], $row['attempts']);
+        }
+
+        return $grouped;
     }
 
     /**
@@ -459,6 +609,10 @@ class PuttStats
             );
         }
 
+        foreach ($this->positionInsights() as $insight) {
+            $insights[] = $insight;
+        }
+
         $fifty = $this->fiftyPercentDistance();
 
         if ($fifty !== null) {
@@ -466,6 +620,107 @@ class PuttStats
         }
 
         return $insights === [] ? ['No strong patterns yet — keep logging.'] : $insights;
+    }
+
+    /**
+     * What position around the hole is telling you.
+     *
+     * The question worth answering is which of two very different problems you
+     * have. Downhill putts being hard is a speed problem; one break direction being
+     * hard is a read or aim problem. They need opposite practice, and pooling the
+     * clock into a single make rate hides which one you are looking at — the two
+     * downhill-sidehill positions sit on opposite break directions, so a player
+     * weak at both is weak at the slope, not at reading one way.
+     *
+     * @return array<int, string>
+     */
+    private function positionInsights(): array
+    {
+        $positions = $this->byClockPosition();
+
+        if ($positions['classified'] < self::MIN_POSITION_SAMPLE) {
+            return [];
+        }
+
+        $insights = [];
+
+        // Flat and straight putts are overwhelmingly the indoor mat, so leaving them
+        // in would compare carpet against real greens and call the result a slope
+        // effect. Uphill against downhill, and one break direction against the other,
+        // are the only comparisons where the ground is genuinely alike.
+        $slopeGap = $this->widestGap(Arr::except($positions['slopes'], [PuttSlope::Flat->value]));
+        $breakGap = $this->widestGap(Arr::except($positions['breaks'], [BreakSide::Straight->value]));
+
+        if ($slopeGap !== null) {
+            $insights[] = sprintf(
+                'You make %s%% on %s putts against %s%% on %s — a %s point swing from the slope alone.',
+                $slopeGap['best']['make_percent'],
+                strtolower($slopeGap['best']['label']),
+                $slopeGap['worst']['make_percent'],
+                strtolower($slopeGap['worst']['label']),
+                $slopeGap['gap'],
+            );
+        }
+
+        if ($breakGap !== null) {
+            $insights[] = sprintf(
+                'Putts %s go in %s%% of the time against %s%% %s. Same slope either way, so a gap that size is aim or read, not speed.',
+                $breakGap['worst']['label'],
+                $breakGap['worst']['make_percent'],
+                $breakGap['best']['make_percent'],
+                $breakGap['best']['label'],
+            );
+        }
+
+        // The disambiguation the clock exists to provide.
+        if ($slopeGap !== null && $breakGap === null) {
+            $insights[] = 'Your two break directions hold up about equally, so it is the slope beating you rather than the read. Work on speed control downhill before you touch green reading.';
+        } elseif ($slopeGap === null && $breakGap !== null) {
+            $insights[] = 'Uphill and downhill hold up about equally, so this is not a speed problem — one break direction is simply reading worse than the other.';
+        }
+
+        $band = collect($positions['bands'])
+            ->filter(fn (array $row): bool => $row['attempts'] >= self::MIN_POSITION_SAMPLE)
+            ->sortBy('make_percent')
+            ->first();
+
+        if ($band !== null && $slopeGap === null && $breakGap === null) {
+            $insights[] = sprintf(
+                'Your weakest ground is %s at %s%% over %d putts.',
+                strtolower($band['label']),
+                $band['make_percent'],
+                $band['attempts'],
+            );
+        }
+
+        return $insights;
+    }
+
+    /**
+     * The best and worst of a rollup, but only when both are well enough sampled
+     * and far enough apart to be worth a sentence.
+     *
+     * @param  array<string, array<string, mixed>>  $rows
+     * @return array<string, mixed>|null
+     */
+    private function widestGap(array $rows): ?array
+    {
+        $usable = collect($rows)
+            ->filter(fn (array $row): bool => $row['attempts'] >= self::MIN_POSITION_SAMPLE)
+            ->sortByDesc('make_percent')
+            ->values();
+
+        if ($usable->count() < 2) {
+            return null;
+        }
+
+        $best = $usable->first();
+        $worst = $usable->last();
+        $gap = round($best['make_percent'] - $worst['make_percent'], 1);
+
+        return $gap >= self::MIN_POSITION_GAP
+            ? ['best' => $best, 'worst' => $worst, 'gap' => $gap]
+            : null;
     }
 
     /**
@@ -493,7 +748,9 @@ class PuttStats
         return Putt::query()
             ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter))
             ->when($this->context, fn (Builder $query, PuttContext $context): Builder => $query->where('context', $context))
-            ->when($this->sessionId, fn (Builder $query, int $id): Builder => $query->where('putting_session_id', $id));
+            ->when($this->sessionId, fn (Builder $query, int $id): Builder => $query->where('putting_session_id', $id))
+            ->when($this->position, fn (Builder $query, ClockPosition $position): Builder => $query->where('clock_position', $position))
+            ->when($this->slope, fn (Builder $query, PuttSlope $slope): Builder => $query->where('slope', $slope));
     }
 
     /**

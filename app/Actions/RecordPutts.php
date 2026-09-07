@@ -2,10 +2,12 @@
 
 namespace App\Actions;
 
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
 use App\Enums\PuttResult;
+use App\Enums\PuttSlope;
 use App\Models\Putt;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +41,7 @@ class RecordPutts
                     : Putter::default();
 
                 $result = PuttResult::from($putt['result']);
+                $position = $this->resolvePosition($putt);
 
                 $session = $this->resolveSession->execute($context, $putter, $hitAt, [
                     'location' => $putt['location'] ?? null,
@@ -54,8 +57,8 @@ class RecordPutts
                         'miss_cause' => $this->resolveMissCause($putt, $result),
                         'context' => $context,
                         'putter' => $putter,
-                        'slope' => $putt['slope'] ?? null,
-                        'break_direction' => $putt['break_direction'] ?? null,
+                        'slope' => $this->resolveSlope($putt, $position),
+                        'clock_position' => $position,
                         'notes' => $putt['notes'] ?? null,
                         'hit_at' => $hitAt,
                     ],
@@ -66,6 +69,47 @@ class RecordPutts
 
             return $stored;
         });
+    }
+
+    /**
+     * The position the client sent, or the one implied by the fields it used to
+     * send instead.
+     *
+     * A phone running a bundle from before the ring existed posts slope and
+     * break_direction. Together those pin down exactly one position, so its putts
+     * arrive properly classified rather than landing in the unclassified bucket
+     * for want of a field it had no way to know about.
+     *
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolvePosition(array $putt): ?ClockPosition
+    {
+        if (isset($putt['clock_position'])) {
+            return ClockPosition::from($putt['clock_position']);
+        }
+
+        return ClockPosition::fromLegacy(
+            $putt['break_direction'] ?? null,
+            isset($putt['slope']) ? PuttSlope::from($putt['slope']) : null,
+        );
+    }
+
+    /**
+     * The clock position already fixes the slope, so it wins whenever one was sent.
+     *
+     * A client running a bundle from before the ring existed still posts its own
+     * slope, and that is kept rather than discarded — the field stays populated
+     * across the changeover instead of going dark for the putts in flight.
+     *
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolveSlope(array $putt, ?ClockPosition $position): ?PuttSlope
+    {
+        if ($position !== null) {
+            return $position->slope();
+        }
+
+        return isset($putt['slope']) ? PuttSlope::from($putt['slope']) : null;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
@@ -29,6 +30,11 @@ class StorePuttsRequest extends FormRequest
             'putts.*.putter' => ['nullable', Rule::enum(Putter::class)],
             'putts.*.miss_cause' => ['nullable', Rule::enum(LineMissCause::class)],
             'putts.*.slope' => ['nullable', Rule::enum(PuttSlope::class)],
+            'putts.*.clock_position' => ['nullable', Rule::enum(ClockPosition::class)],
+            // Superseded by clock_position and never written any more, but still
+            // accepted: a phone running a cached bundle posts it, and paired with
+            // slope it reconstructs the position exactly. Rejecting it would throw
+            // that away.
             'putts.*.break_direction' => ['nullable', 'string', 'max:40'],
             'putts.*.location' => ['nullable', 'string', 'max:120'],
             'putts.*.surface' => ['nullable', 'string', 'max:120'],

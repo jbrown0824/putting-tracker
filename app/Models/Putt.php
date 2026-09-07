@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\Putter;
@@ -28,7 +29,7 @@ class Putt extends Model
         'context',
         'putter',
         'slope',
-        'break_direction',
+        'clock_position',
         'notes',
         'hit_at',
     ];
@@ -41,6 +42,7 @@ class Putt extends Model
             'context' => PuttContext::class,
             'putter' => Putter::class,
             'slope' => PuttSlope::class,
+            'clock_position' => ClockPosition::class,
             'distance_ft' => 'integer',
             'hit_at' => 'datetime',
         ];

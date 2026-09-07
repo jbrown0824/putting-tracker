@@ -58,6 +58,36 @@
         @endif
     @endif
 
+        @if ($totalPutts > 0 && $adjusted['reliable'])
+            <section class="mt-5">
+                <h2 class="text-sm font-medium text-slate-300">Make rate, levelled</h2>
+                <p class="mt-1 text-[11px] text-slate-500">
+                    What this make rate would be over your usual mix of putts, so it can be
+                    compared with any other scope instead of only with itself.
+                </p>
+
+                <div class="mt-2 rounded-lg bg-slate-900 p-3">
+                    <div class="flex items-baseline justify-center gap-4">
+                        <div class="text-center">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Raw</div>
+                            <div class="text-xl font-medium text-slate-400">{{ $adjusted['raw_percent'] }}%</div>
+                        </div>
+                        <div class="text-slate-700">→</div>
+                        <div class="text-center">
+                            <div class="text-[10px] uppercase tracking-wide text-emerald-500">Levelled</div>
+                            <div class="text-xl font-medium text-emerald-300">{{ $adjusted['adjusted_percent'] }}%</div>
+                        </div>
+                    </div>
+
+                    <p class="mt-2 text-center text-[11px] leading-relaxed text-slate-400">{{ $adjusted['note'] }}</p>
+                    <p class="mt-1 text-center text-[10px] text-slate-600">
+                        Matched on {{ \App\Services\AdjustedRate::describeDimensions($adjusted['dimensions']) }} across
+                        {{ $adjusted['matched_attempts'] }} putts ({{ $adjusted['coverage_percent'] }}% of your mix).
+                    </p>
+                </div>
+            </section>
+        @endif
+
         @if ($insights !== [])
             <section class="mt-5">
                 <h2 class="text-sm font-medium text-slate-300">What the data says</h2>
@@ -98,6 +128,50 @@
                         $extremes['worst']['summary'],
                     ),
                 ])
+            </section>
+        @endif
+
+        @if ($clockPositions['classified'] > 0)
+            <section class="mt-6">
+                <h2 class="text-sm font-medium text-slate-300">Around the hole</h2>
+                <p class="mt-1 text-[11px] text-slate-500">
+                    Make rate by where the ball sat, shaded against your own best position.
+                </p>
+
+                @include('partials.clock-heatmap', ['positions' => $clockPositions['positions']])
+
+                @php
+                    $slopeRows = collect($clockPositions['slopes'])->filter(fn (array $row): bool => $row['attempts'] >= 8);
+                    $breakRows = collect($clockPositions['breaks'])->filter(fn (array $row): bool => $row['attempts'] >= 8);
+                @endphp
+
+                @foreach ([['Uphill vs. downhill', $slopeRows], ['Which way it breaks', $breakRows]] as [$heading, $rows])
+                    @if ($rows->count() > 1)
+                        <div class="mt-3">
+                            <div class="text-[11px] text-slate-500">{{ $heading }}</div>
+                            <div class="mt-1 space-y-1">
+                                @foreach ($rows->sortByDesc('make_percent') as $row)
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-20 shrink-0 text-[10px] text-slate-500">{{ $row['label'] }}</span>
+                                        <div class="h-3.5 flex-1 overflow-hidden rounded bg-slate-900">
+                                            <div class="h-full bg-emerald-500/40" style="width: {{ max(2, $row['make_percent']) }}%"></div>
+                                        </div>
+                                        <span class="w-16 shrink-0 text-right text-[10px] text-slate-500">
+                                            {{ $row['make_percent'] }}% <span class="text-slate-700">n={{ $row['attempts'] }}</span>
+                                        </span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+                @endforeach
+
+                @if ($clockPositions['unclassified'] > 0)
+                    <p class="mt-2 text-[10px] text-slate-600">
+                        {{ $clockPositions['unclassified'] }} putts were logged before positions were tracked
+                        and sit outside this section — they are unclassified, not flat.
+                    </p>
+                @endif
             </section>
         @endif
 
