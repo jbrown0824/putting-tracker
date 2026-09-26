@@ -3,8 +3,9 @@
 namespace App\Services;
 
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
+use App\Models\Putter;
+use App\Models\User;
 use Illuminate\Support\Collection;
 
 class PutterComparison
@@ -41,11 +42,54 @@ class PutterComparison
 
     private ?PuttContext $context = null;
 
+    private ?Putter $first = null;
+
+    private ?Putter $second = null;
+
     public function __construct(
         private PuttStats $stats,
         private PuttingProfile $profile,
         private AdjustedRate $adjusted,
     ) {}
+
+    /**
+     * A copy that reads one player's putts. Required before anything is compared.
+     */
+    public function forUser(User $user): self
+    {
+        $clone = clone $this;
+        $clone->stats = $this->stats->forUser($user);
+        $clone->forget();
+
+        return $clone;
+    }
+
+    /**
+     * The two putters under comparison. Results are keyed by putter id, and every
+     * head-to-head figure reads "second minus first", so a positive gap favours the
+     * second putter.
+     */
+    public function between(Putter $first, Putter $second): self
+    {
+        $clone = clone $this;
+        $clone->first = $first;
+        $clone->second = $second;
+        $clone->forget();
+
+        return $clone;
+    }
+
+    /**
+     * @return array{0: Putter, 1: Putter}
+     */
+    public function putters(): array
+    {
+        if ($this->first === null || $this->second === null) {
+            throw new \LogicException('Choose two putters with between() before comparing.');
+        }
+
+        return [$this->first, $this->second];
+    }
 
     /**
      * Each putter's radar profile, for overlaying one shape on the other.
@@ -61,8 +105,8 @@ class PutterComparison
     {
         $scoped = [];
 
-        foreach (Putter::cases() as $putter) {
-            $scoped[$putter->value] = $this->scopedStats($putter);
+        foreach ($this->putters() as $putter) {
+            $scoped[$putter->id] = $this->scopedStats($putter);
         }
 
         $splitLine = collect($scoped)->every(
@@ -85,8 +129,7 @@ class PutterComparison
     {
         $clone = clone $this;
         $clone->context = $context;
-        $clone->headline = null;
-        $clone->byDistance = null;
+        $clone->forget();
 
         return $clone;
     }
@@ -98,21 +141,23 @@ class PutterComparison
 
     /**
      * How each putter holds up when you leave the carpet: inside and outside make
-     * rates side by side, plus the points given up moving between them.
+     * rates side by side, plus the points given up moving between them. Keyed by
+     * putter id.
      *
-     * @return array<string, array<string, mixed>>
+     * @param  iterable<int, Putter>  $putters  defaults to the pair under comparison
+     * @return array<int, array<string, mixed>>
      */
-    public function contextBreakdown(): array
+    public function contextBreakdown(?iterable $putters = null): array
     {
         $breakdown = [];
 
-        foreach (Putter::cases() as $putter) {
+        foreach ($putters ?? $this->putters() as $putter) {
             // Deliberately not context-scoped: this row spans both sides.
             $scoped = $this->stats->forPutter($putter);
             $inside = $this->contextSummary($scoped, PuttContext::Inside);
             $outside = $this->contextSummary($scoped, PuttContext::Outside);
 
-            $breakdown[$putter->value] = [
+            $breakdown[$putter->id] = [
                 'putter' => $putter,
                 'inside' => $inside,
                 'outside' => $outside,
@@ -125,12 +170,12 @@ class PutterComparison
     }
 
     /**
-     * Side-by-side totals for each putter, keyed by putter value.
+     * Side-by-side totals for each putter, keyed by putter id.
      *
      * Memoised because verdict() and strengths() both lean on it, and each call
      * costs a handful of aggregate queries per putter.
      *
-     * @return array<string, array<string, mixed>>
+     * @return array<int, array<string, mixed>>
      */
     public function headline(): array
     {
@@ -140,14 +185,14 @@ class PutterComparison
 
         $headline = [];
 
-        foreach (Putter::cases() as $putter) {
+        foreach ($this->putters() as $putter) {
             $scoped = $this->scopedStats($putter);
             $dial = $scoped->missDial();
             $split = $scoped->speedVsLine();
 
             $attempts = array_sum(array_column($dial, 'count'));
 
-            $headline[$putter->value] = [
+            $headline[$putter->id] = [
                 'putter' => $putter,
                 'attempts' => $attempts,
                 'sunk' => $dial[PuttResult::Sunk->value]['count'],
@@ -179,26 +224,27 @@ class PutterComparison
             return $this->byDistance;
         }
 
-        $blade = $this->scopedStats(Putter::Blade)->byDistance()->keyBy('distance_ft');
-        $mallet = $this->scopedStats(Putter::Mallet)->byDistance()->keyBy('distance_ft');
+        [$firstPutter, $secondPutter] = $this->putters();
+        $first = $this->scopedStats($firstPutter)->byDistance()->keyBy('distance_ft');
+        $second = $this->scopedStats($secondPutter)->byDistance()->keyBy('distance_ft');
 
-        return $this->byDistance = $blade->keys()
-            ->intersect($mallet->keys())
+        return $this->byDistance = $first->keys()
+            ->intersect($second->keys())
             ->sort()
             ->values()
             ->map(fn (int $distance): array => [
                 'distance_ft' => $distance,
-                'blade_percent' => $blade[$distance]['make_percent'],
-                'mallet_percent' => $mallet[$distance]['make_percent'],
-                'blade_attempts' => $blade[$distance]['attempts'],
-                'mallet_attempts' => $mallet[$distance]['attempts'],
+                'first_percent' => $first[$distance]['make_percent'],
+                'second_percent' => $second[$distance]['make_percent'],
+                'first_attempts' => $first[$distance]['attempts'],
+                'second_attempts' => $second[$distance]['attempts'],
                 // The smaller of the two counts: neither putter gets credit for reps
                 // the other never took at this distance.
-                'weight' => min($blade[$distance]['attempts'], $mallet[$distance]['attempts']),
-                'gap' => round($mallet[$distance]['make_percent'] - $blade[$distance]['make_percent'], 1),
+                'weight' => min($first[$distance]['attempts'], $second[$distance]['attempts']),
+                'gap' => round($second[$distance]['make_percent'] - $first[$distance]['make_percent'], 1),
             ])
-            ->filter(fn (array $row): bool => $row['blade_attempts'] >= self::MIN_ATTEMPTS_PER_DISTANCE
-                && $row['mallet_attempts'] >= self::MIN_ATTEMPTS_PER_DISTANCE)
+            ->filter(fn (array $row): bool => $row['first_attempts'] >= self::MIN_ATTEMPTS_PER_DISTANCE
+                && $row['second_attempts'] >= self::MIN_ATTEMPTS_PER_DISTANCE)
             ->values();
     }
 
@@ -213,9 +259,11 @@ class PutterComparison
      */
     public function matchedRates(): array
     {
+        [$first, $second] = $this->putters();
+
         return $this->matched ??= $this->adjusted->matched([
-            'blade' => $this->scopedStats(Putter::Blade),
-            'mallet' => $this->scopedStats(Putter::Mallet),
+            'first' => $this->scopedStats($first),
+            'second' => $this->scopedStats($second),
         ]);
     }
 
@@ -236,41 +284,39 @@ class PutterComparison
      */
     public function verdict(): array
     {
+        [$first, $second] = $this->putters();
         $headline = $this->headline();
-
-        $bladeAttempts = $headline[Putter::Blade->value]['attempts'];
-        $malletAttempts = $headline[Putter::Mallet->value]['attempts'];
 
         $matched = $this->matchedRates();
         $sample = $matched['sample'];
 
-        $shortfall = $this->shortfall($bladeAttempts, $malletAttempts, $sample);
+        $shortfall = $this->shortfall($headline[$first->id]['attempts'], $headline[$second->id]['attempts'], $sample);
 
         if ($shortfall !== null) {
             return $shortfall;
         }
 
-        $bladeRate = $matched['scopes']['blade']['adjusted_percent'];
-        $malletRate = $matched['scopes']['mallet']['adjusted_percent'];
-        $gap = round($malletRate - $bladeRate, 1);
-        $leader = $gap >= 0 ? Putter::Mallet : Putter::Blade;
-        $z = $this->zScore($bladeRate, $malletRate, $sample);
+        $firstRate = $matched['scopes']['first']['adjusted_percent'];
+        $secondRate = $matched['scopes']['second']['adjusted_percent'];
+        $gap = round($secondRate - $firstRate, 1);
+        $leader = $gap >= 0 ? $second : $first;
+        $z = $this->zScore($firstRate, $secondRate, $sample);
 
         if (abs($z) < self::CONFIDENCE_Z) {
             return [
                 'state' => 'too_close',
                 'putter' => null,
-                'blade_percent' => $bladeRate,
-                'mallet_percent' => $malletRate,
+                'first_percent' => $firstRate,
+                'second_percent' => $secondRate,
                 'gap' => $gap,
                 'sample' => $sample,
                 'z' => round($z, 2),
                 'matched_on' => $matched['dimensions'],
                 'message' => sprintf(
-                    'Too close to call. Across %d putts matched on %s, the %s is ahead by just %s points, which is inside the noise — play whichever you prefer.',
+                    'Too close to call. Across %d putts matched on %s, %s is ahead by just %s points, which is inside the noise — play whichever you prefer.',
                     $sample,
                     AdjustedRate::describeDimensions($matched['dimensions']),
-                    strtolower($leader->label()),
+                    $leader->name,
                     abs($gap),
                 ),
             ];
@@ -279,19 +325,19 @@ class PutterComparison
         return [
             'state' => 'recommended',
             'putter' => $leader,
-            'blade_percent' => $bladeRate,
-            'mallet_percent' => $malletRate,
+            'first_percent' => $firstRate,
+            'second_percent' => $secondRate,
             'gap' => $gap,
             'sample' => $sample,
             'z' => round($z, 2),
             'matched_on' => $matched['dimensions'],
             'message' => sprintf(
-                'Play the %s. Levelled for %s so both face the same mix, it makes %s%% against the %s\'s %s%% — %s points better over %d matched putts, which is more than chance explains.',
-                strtolower($leader->label()),
+                'Play %s. Levelled for %s so both face the same mix, it makes %s%% against %s\'s %s%% — %s points better over %d matched putts, which is more than chance explains.',
+                $leader->name,
                 AdjustedRate::describeDimensions($matched['dimensions']),
-                $leader === Putter::Mallet ? $malletRate : $bladeRate,
-                strtolower($leader->other()->label()),
-                $leader === Putter::Mallet ? $bladeRate : $malletRate,
+                $leader->is($second) ? $secondRate : $firstRate,
+                $this->other($leader)->name,
+                $leader->is($second) ? $firstRate : $secondRate,
                 abs($gap),
                 $sample,
             ),
@@ -300,10 +346,10 @@ class PutterComparison
 
     /**
      * What each putter does better than the other, strongest signal first and keyed
-     * by putter value. Every entry is gated on its own sample, so a thin dataset
+     * by putter id. Every entry is gated on its own sample, so a thin dataset
      * yields fewer claims rather than weaker ones.
      *
-     * @return array<string, array<int, array<string, mixed>>>
+     * @return array<int, array<int, array<string, mixed>>>
      */
     public function strengths(): array
     {
@@ -322,9 +368,9 @@ class PutterComparison
 
         $strengths = [];
 
-        foreach (Putter::cases() as $putter) {
-            $strengths[$putter->value] = $items
-                ->where('putter', $putter)
+        foreach ($this->putters() as $putter) {
+            $strengths[$putter->id] = $items
+                ->filter(fn (array $item): bool => $item['putter']->is($putter))
                 ->sortByDesc('magnitude')
                 ->values()
                 ->all();
@@ -350,22 +396,22 @@ class PutterComparison
     /**
      * Two-proportion z-test with both arms sharing the matched sample size.
      */
-    private function zScore(float $bladePercent, float $malletPercent, int $sample): float
+    private function zScore(float $firstPercent, float $secondPercent, int $sample): float
     {
         if ($sample <= 0) {
             return 0.0;
         }
 
-        $blade = $bladePercent / 100;
-        $mallet = $malletPercent / 100;
-        $pooled = ($blade + $mallet) / 2;
+        $first = $firstPercent / 100;
+        $second = $secondPercent / 100;
+        $pooled = ($first + $second) / 2;
         $variance = $pooled * (1 - $pooled) * (2 / $sample);
 
         if ($variance <= 0.0) {
             return 0.0;
         }
 
-        return ($mallet - $blade) / sqrt($variance);
+        return ($second - $first) / sqrt($variance);
     }
 
     /**
@@ -373,12 +419,13 @@ class PutterComparison
      *
      * @return array<string, mixed>|null
      */
-    private function shortfall(int $bladeAttempts, int $malletAttempts, int $sample): ?array
+    private function shortfall(int $firstAttempts, int $secondAttempts, int $sample): ?array
     {
-        $thinnest = min($bladeAttempts, $malletAttempts);
+        $thinnest = min($firstAttempts, $secondAttempts);
 
         if ($thinnest < self::MIN_ATTEMPTS_PER_PUTTER) {
-            $behind = $bladeAttempts <= $malletAttempts ? Putter::Blade : Putter::Mallet;
+            [$first, $second] = $this->putters();
+            $behind = $firstAttempts <= $secondAttempts ? $first : $second;
 
             return [
                 'state' => 'insufficient_data',
@@ -386,9 +433,9 @@ class PutterComparison
                 'needed' => self::MIN_ATTEMPTS_PER_PUTTER - $thinnest,
                 'sample' => $sample,
                 'message' => sprintf(
-                    'Not enough data to call it. Log %d more putts with the %s and this will start comparing them.',
+                    'Not enough data to call it. Log %d more putts with %s and this will start comparing them.',
                     self::MIN_ATTEMPTS_PER_PUTTER - $thinnest,
-                    strtolower($behind->label()),
+                    $behind->name,
                 ),
             ];
         }
@@ -422,24 +469,24 @@ class PutterComparison
             return null;
         }
 
-        $blade = $this->matchedRate($slice, 'blade_percent');
-        $mallet = $this->matchedRate($slice, 'mallet_percent');
-        $gap = round($mallet - $blade, 1);
+        $first = $this->matchedRate($slice, 'first_percent');
+        $second = $this->matchedRate($slice, 'second_percent');
+        $gap = round($second - $first, 1);
 
         if (abs($gap) < 3.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
+        $secondWins = $gap > 0;
 
         return [
-            'putter' => $winner,
+            'putter' => $this->pick($secondWins),
             'magnitude' => abs($gap),
             'headline' => $label,
             'detail' => sprintf(
                 '%s%% vs %s%% %s — %s points better over %d matched putts.',
-                $winner === Putter::Mallet ? $mallet : $blade,
-                $winner === Putter::Mallet ? $blade : $mallet,
+                $secondWins ? $second : $first,
+                $secondWins ? $first : $second,
                 $phrase,
                 abs($gap),
                 $sample,
@@ -451,37 +498,38 @@ class PutterComparison
      * A putter whose misses skew to speed is keeping the ball on line, which is
      * the whole argument for a high-MOI head.
      *
-     * @param  array<string, array<string, mixed>>  $headline
+     * @param  array<int, array<string, mixed>>  $headline
      * @return array<string, mixed>|null
      */
     private function lineControlStrength(array $headline): ?array
     {
-        $blade = $headline[Putter::Blade->value];
-        $mallet = $headline[Putter::Mallet->value];
+        [$firstPutter, $secondPutter] = $this->putters();
+        $first = $headline[$firstPutter->id];
+        $second = $headline[$secondPutter->id];
 
-        if ($blade['line_percent'] + $blade['speed_percent'] <= 0 || $mallet['line_percent'] + $mallet['speed_percent'] <= 0) {
+        if ($first['line_percent'] + $first['speed_percent'] <= 0 || $second['line_percent'] + $second['speed_percent'] <= 0) {
             return null;
         }
 
-        $gap = round($blade['line_percent'] - $mallet['line_percent'], 1);
+        $gap = round($first['line_percent'] - $second['line_percent'], 1);
 
         if (abs($gap) < 5.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
-        $winnerLine = $winner === Putter::Mallet ? $mallet['line_percent'] : $blade['line_percent'];
-        $loserLine = $winner === Putter::Mallet ? $blade['line_percent'] : $mallet['line_percent'];
+        $winner = $this->pick($gap > 0);
+        $winnerLine = $headline[$winner->id]['line_percent'];
+        $loserLine = $headline[$this->other($winner)->id]['line_percent'];
 
         return [
             'putter' => $winner,
             'magnitude' => abs($gap),
             'headline' => 'Holds the line',
             'detail' => sprintf(
-                'Only %s%% of its misses are left or right, against %s%% for the %s. The rest are speed, which is the easier error to fix.',
+                'Only %s%% of its misses are left or right, against %s%% for %s. The rest are speed, which is the easier error to fix.',
                 $winnerLine,
                 $loserLine,
-                strtolower($winner->other()->label()),
+                $this->other($winner)->name,
             ),
         ];
     }
@@ -498,7 +546,7 @@ class PutterComparison
     {
         $rates = [];
 
-        foreach ([Putter::Blade, Putter::Mallet] as $putter) {
+        foreach ($this->putters() as $putter) {
             $scoped = $this->scopedStats($putter);
             $causes = $scoped->lineMissCauses();
 
@@ -514,29 +562,30 @@ class PutterComparison
 
             // Extrapolate the classified sample across every line miss, as the radar does.
             $lineMisses = $scoped->speedVsLine()['line'];
-            $rates[$putter->value] = round(
+            $rates[$putter->id] = round(
                 $lineMisses * ($causes['stroke_percent'] / 100) / $attempts * 100,
                 1,
             );
         }
 
-        $gap = round($rates[Putter::Blade->value] - $rates[Putter::Mallet->value], 1);
+        [$first, $second] = $this->putters();
+        $gap = round($rates[$first->id] - $rates[$second->id], 1);
 
         if (abs($gap) < 2.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
+        $winner = $this->pick($gap > 0);
 
         return [
             'putter' => $winner,
             'magnitude' => abs($gap) * 3,
             'headline' => 'Squares the face',
             'detail' => sprintf(
-                'Only %s%% of putts are pushed or pulled with it, against %s%% for the %s. That gap is the head shape doing its job, not the read.',
-                $rates[$winner->value],
-                $rates[$winner->other()->value],
-                strtolower($winner->other()->label()),
+                'Only %s%% of putts are pushed or pulled with it, against %s%% for %s. That gap is the head shape doing its job, not the read.',
+                $rates[$winner->id],
+                $rates[$this->other($winner)->id],
+                $this->other($winner)->name,
             ),
         ];
     }
@@ -545,40 +594,41 @@ class PutterComparison
      * Carpet flatters both putters. The one that gives up least on a real green is
      * the one that actually travels.
      *
-     * @param  array<string, array<string, mixed>>  $headline
+     * @param  array<int, array<string, mixed>>  $headline
      * @return array<string, mixed>|null
      */
     private function outdoorStrength(array $headline): ?array
     {
         $drops = [];
 
-        foreach ([Putter::Blade, Putter::Mallet] as $putter) {
-            $row = $headline[$putter->value];
+        foreach ($this->putters() as $putter) {
+            $row = $headline[$putter->id];
 
             if ($row['inside']['attempts'] < 25 || $row['outside']['attempts'] < 25) {
                 return null;
             }
 
-            $drops[$putter->value] = round($row['inside']['make_percent'] - $row['outside']['make_percent'], 1);
+            $drops[$putter->id] = round($row['inside']['make_percent'] - $row['outside']['make_percent'], 1);
         }
 
-        $gap = round($drops[Putter::Blade->value] - $drops[Putter::Mallet->value], 1);
+        [$first, $second] = $this->putters();
+        $gap = round($drops[$first->id] - $drops[$second->id], 1);
 
         if (abs($gap) < 4.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
+        $winner = $this->pick($gap > 0);
 
         return [
             'putter' => $winner,
             'magnitude' => abs($gap),
             'headline' => 'Travels to real greens',
             'detail' => sprintf(
-                'Moving outside it %s, where the %s %s.',
-                $this->describeDrop($drops[$winner->value]),
-                strtolower($winner->other()->label()),
-                $this->describeDrop($drops[$winner->other()->value]),
+                'Moving outside it %s, where %s %s.',
+                $this->describeDrop($drops[$winner->id]),
+                $this->other($winner)->name,
+                $this->describeDrop($drops[$this->other($winner)->id]),
             ),
         ];
     }
@@ -601,35 +651,37 @@ class PutterComparison
      * Scored in feet, multiplied to sit on a comparable scale to the percentage-point
      * magnitudes the other strengths report.
      *
-     * @param  array<string, array<string, mixed>>  $headline
+     * @param  array<int, array<string, mixed>>  $headline
      * @return array<string, mixed>|null
      */
     private function reachStrength(array $headline): ?array
     {
-        $blade = $headline[Putter::Blade->value]['fifty_percent_distance'];
-        $mallet = $headline[Putter::Mallet->value]['fifty_percent_distance'];
+        [$firstPutter, $secondPutter] = $this->putters();
+        $first = $headline[$firstPutter->id]['fifty_percent_distance'];
+        $second = $headline[$secondPutter->id]['fifty_percent_distance'];
 
-        if ($blade === null || $mallet === null) {
+        if ($first === null || $second === null) {
             return null;
         }
 
-        $gap = round($mallet - $blade, 1);
+        $gap = round($second - $first, 1);
 
         if (abs($gap) < 1.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
+        $secondWins = $gap > 0;
+        $winner = $this->pick($secondWins);
 
         return [
             'putter' => $winner,
             'magnitude' => abs($gap) * 4,
             'headline' => 'Reaches further',
             'detail' => sprintf(
-                'Still a coin flip at %s ft, where the %s is down to 50%% by %s ft.',
-                $winner === Putter::Mallet ? $mallet : $blade,
-                strtolower($winner->other()->label()),
-                $winner === Putter::Mallet ? $blade : $mallet,
+                'Still a coin flip at %s ft, where %s is down to 50%% by %s ft.',
+                $secondWins ? $second : $first,
+                $this->other($winner)->name,
+                $secondWins ? $first : $second,
             ),
         ];
     }
@@ -638,32 +690,33 @@ class PutterComparison
      * A lopsided left/right miss is aim or path rather than the read, so the putter
      * that stays balanced is the one not fighting your stroke.
      *
-     * @param  array<string, array<string, mixed>>  $headline
+     * @param  array<int, array<string, mixed>>  $headline
      * @return array<string, mixed>|null
      */
     private function aimStrength(array $headline): ?array
     {
         $skews = [];
 
-        foreach ([Putter::Blade, Putter::Mallet] as $putter) {
-            $row = $headline[$putter->value];
+        foreach ($this->putters() as $putter) {
+            $row = $headline[$putter->id];
             $sides = $row['miss_left'] + $row['miss_right'];
 
             if ($sides < 20) {
                 return null;
             }
 
-            $skews[$putter->value] = round(abs($row['miss_left'] - $row['miss_right']) / $sides * 100, 1);
+            $skews[$putter->id] = round(abs($row['miss_left'] - $row['miss_right']) / $sides * 100, 1);
         }
 
-        $gap = round($skews[Putter::Blade->value] - $skews[Putter::Mallet->value], 1);
+        [$first, $second] = $this->putters();
+        $gap = round($skews[$first->id] - $skews[$second->id], 1);
 
         if (abs($gap) < 12.0) {
             return null;
         }
 
-        $winner = $gap > 0 ? Putter::Mallet : Putter::Blade;
-        $loserRow = $headline[$winner->other()->value];
+        $winner = $this->pick($gap > 0);
+        $loserRow = $headline[$this->other($winner)->id];
         $loserSide = $loserRow['miss_left'] > $loserRow['miss_right'] ? 'left' : 'right';
 
         return [
@@ -671,13 +724,36 @@ class PutterComparison
             'magnitude' => abs($gap),
             'headline' => 'Misses evenly',
             'detail' => sprintf(
-                'Its line misses split %s%% to one side, against %s%% for the %s, which leaks %s.',
-                $skews[$winner->value],
-                $skews[$winner->other()->value],
-                strtolower($winner->other()->label()),
+                'Its line misses split %s%% to one side, against %s%% for %s, which leaks %s.',
+                $skews[$winner->id],
+                $skews[$this->other($winner)->id],
+                $this->other($winner)->name,
                 $loserSide,
             ),
         ];
+    }
+
+    /**
+     * The second putter when true, the first when false — matching the sign
+     * convention of every gap, where positive favours the second.
+     */
+    private function pick(bool $second): Putter
+    {
+        return $this->putters()[$second ? 1 : 0];
+    }
+
+    private function other(Putter $putter): Putter
+    {
+        [$first, $second] = $this->putters();
+
+        return $putter->is($first) ? $second : $first;
+    }
+
+    private function forget(): void
+    {
+        $this->headline = null;
+        $this->byDistance = null;
+        $this->matched = null;
     }
 
     /**

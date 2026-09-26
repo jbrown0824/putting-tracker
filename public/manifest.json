@@ -1,8 +1,8 @@
 {
     "name": "Putting Tracker",
     "short_name": "Putts",
-    "description": "2,000 putt challenge tracker",
-    "start_url": "/",
+    "description": "Putting practice tracker",
+    "start_url": "/log",
     "scope": "/",
     "display": "standalone",
     "orientation": "portrait",

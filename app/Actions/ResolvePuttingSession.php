@@ -3,8 +3,10 @@
 namespace App\Actions;
 
 use App\Enums\PuttContext;
-use App\Enums\Putter;
+use App\Enums\SurfaceType;
+use App\Models\Putter;
 use App\Models\PuttingSession;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 
 class ResolvePuttingSession
@@ -15,19 +17,27 @@ class ResolvePuttingSession
     public const IDLE_GAP_MINUTES = 90;
 
     /**
-     * Sessions are implicit: a putt joins the most recent session sharing its context
-     * and putter unless too much time has passed, in which case a fresh session opens.
+     * Sessions are implicit: a putt joins the player's most recent session sharing
+     * its context, surface and putter unless too much time has passed, in which case
+     * a fresh session opens.
      *
      * Switching putters splits the session even mid-practice, so a session's make rate
-     * always describes exactly one putter.
+     * always describes exactly one putter on one surface.
      *
-     * @param  array{location?: string|null, surface?: string|null}  $attributes
+     * @param  array{location?: string|null}  $attributes
      */
-    public function execute(PuttContext $context, Putter $putter, Carbon $hitAt, array $attributes = []): PuttingSession
-    {
-        $candidate = PuttingSession::query()
+    public function execute(
+        User $user,
+        PuttContext $context,
+        ?SurfaceType $surfaceType,
+        Putter $putter,
+        Carbon $hitAt,
+        array $attributes = [],
+    ): PuttingSession {
+        $candidate = $user->puttingSessions()
             ->where('context', $context)
-            ->where('putter', $putter)
+            ->where('surface_type', $surfaceType)
+            ->where('putter_id', $putter->id)
             ->where('started_at', '<=', $hitAt)
             ->latest('started_at')
             ->first();
@@ -36,11 +46,11 @@ class ResolvePuttingSession
             return $candidate;
         }
 
-        return PuttingSession::query()->create([
+        return $user->puttingSessions()->create([
+            'putter_id' => $putter->id,
             'context' => $context,
-            'putter' => $putter,
+            'surface_type' => $surfaceType,
             'location' => $attributes['location'] ?? null,
-            'surface' => $attributes['surface'] ?? null,
             'started_at' => $hitAt,
         ]);
     }

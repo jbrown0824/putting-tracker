@@ -5,36 +5,32 @@ namespace App\Http\Controllers\Api;
 use App\Actions\RecordPutts;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePuttsRequest;
-use App\Models\Challenge;
-use App\Models\Putt;
-use App\Services\PuttStats;
+use App\Services\PracticeSummary;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class PuttSyncController extends Controller
 {
-    public function store(StorePuttsRequest $request, RecordPutts $record, PuttStats $stats): JsonResponse
+    public function store(StorePuttsRequest $request, RecordPutts $record, PracticeSummary $summary): JsonResponse
     {
-        $stored = $record->execute($request->validated('putts'));
-        $challenge = Challenge::current();
+        $stored = $record->execute($request->user(), $request->validated('putts'));
 
         return response()->json([
             'stored' => $stored,
-            'progress' => $challenge !== null ? $stats->progress($challenge) : null,
+            'progress' => $summary->for($request->user()),
         ]);
     }
 
-    public function progress(PuttStats $stats): JsonResponse
+    public function progress(Request $request, PracticeSummary $summary): JsonResponse
     {
-        $challenge = Challenge::current();
-
         return response()->json([
-            'progress' => $challenge !== null ? $stats->progress($challenge) : null,
+            'progress' => $summary->for($request->user()),
         ]);
     }
 
-    public function destroy(string $uuid): JsonResponse
+    public function destroy(Request $request, string $uuid): JsonResponse
     {
-        Putt::query()->where('uuid', $uuid)->delete();
+        $request->user()->putts()->where('uuid', $uuid)->delete();
 
         return response()->json(['deleted' => $uuid]);
     }

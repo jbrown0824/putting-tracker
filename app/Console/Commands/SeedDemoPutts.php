@@ -3,25 +3,34 @@
 namespace App\Console\Commands;
 
 use App\Actions\GenerateDemoPutts;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class SeedDemoPutts extends Command
 {
     protected $signature = 'putts:demo
+        {email : The player whose putts are replaced}
         {--days=14 : How many days of practice to generate}
         {--profile= : lag, charger, puller, pusher, elite, struggling, or random}
-        {--keep-window : Leave the challenge start date untouched}
         {--fresh : Required to delete putts that already exist}';
 
-    protected $description = 'Replace all putts with a fresh random dataset for testing the stats page';
+    protected $description = "Replace one player's putts with a fresh random dataset for testing the stats page";
 
     public function handle(GenerateDemoPutts $generate): int
     {
+        $user = User::query()->where('email', $this->argument('email'))->first();
+
+        if ($user === null) {
+            $this->components->error(sprintf('No player is registered as [%s].', $this->argument('email')));
+
+            return self::FAILURE;
+        }
+
         try {
             $summary = $generate->execute(
+                user: $user,
                 days: max(1, (int) $this->option('days')),
                 profileName: $this->option('profile'),
-                alignChallengeWindow: ! $this->option('keep-window'),
                 replaceExisting: (bool) $this->option('fresh'),
             );
         } catch (\InvalidArgumentException $e) {
@@ -47,8 +56,7 @@ class SeedDemoPutts extends Command
             ['Outdoor penalty', $summary['outdoor_penalty'].' pts'],
         ]);
 
-        $this->line('  Run again for a different dataset. Restore the real challenge window with:');
-        $this->line('  <fg=gray>php artisan db:seed --class=ChallengeSeeder</>');
+        $this->line('  Run again with --fresh for a different dataset.');
 
         return self::SUCCESS;
     }

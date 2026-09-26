@@ -2,30 +2,11 @@
 
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
-use App\Models\Challenge;
 use App\Models\Putt;
-use App\Models\PuttingSession;
-use App\Services\PutterComparison;
 use App\Services\PuttingProfile;
-use App\Services\PuttStats;
-use Illuminate\Support\Carbon;
 
-function logCause(int $count, PuttResult $result, ?LineMissCause $cause, PuttContext $context = PuttContext::Inside, Putter $putter = Putter::Blade): void
-{
-    $session = PuttingSession::factory()->create(['context' => $context, 'putter' => $putter]);
-
-    Putt::factory()->count($count)->create([
-        'putting_session_id' => $session->id,
-        'result' => $result,
-        'miss_cause' => $cause,
-        'distance_ft' => 10,
-        'context' => $context,
-        'putter' => $putter,
-        'hit_at' => Carbon::now(),
-    ]);
-}
+beforeEach(fn () => $this->actingAs(testUser()));
 
 it('names the miss the way a golfer would', function () {
     expect(LineMissCause::Stroke->labelFor(PuttResult::MissLeft))->toBe('Pull')
@@ -46,7 +27,7 @@ it('splits line misses by cause and keeps unclassified ones separate', function 
     logCause(20, PuttResult::MissLeft, null);
     logCause(40, PuttResult::MissShort, null);
 
-    $causes = app(PuttStats::class)->lineMissCauses();
+    $causes = stats()->lineMissCauses();
 
     expect($causes['stroke'])->toBe(30)
         ->and($causes['read'])->toBe(10)
@@ -62,18 +43,18 @@ it('reports the cause split separately for inside and outside', function () {
     logCause(5, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Outside);
     logCause(15, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Outside);
 
-    $byContext = app(PuttStats::class)->lineMissCauses()['by_context'];
+    $byContext = stats()->lineMissCauses()['by_context'];
 
     expect($byContext['inside']['read_percent'])->toBe(10.0)
         ->and($byContext['outside']['read_percent'])->toBe(75.0);
 });
 
 it('scopes the cause split to the putter', function () {
-    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, Putter::Blade);
-    logCause(20, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, Putter::Mallet);
+    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, blade());
+    logCause(20, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, mallet());
 
-    $blade = app(PuttStats::class)->forPutter(Putter::Blade)->lineMissCauses();
-    $mallet = app(PuttStats::class)->forPutter(Putter::Mallet)->lineMissCauses();
+    $blade = stats()->forPutter(blade())->lineMissCauses();
+    $mallet = stats()->forPutter(mallet())->lineMissCauses();
 
     expect($blade['stroke_percent'])->toBe(100.0)
         ->and($mallet['read_percent'])->toBe(100.0);
@@ -85,12 +66,12 @@ it('splits the radar line axis in two once enough misses carry a cause', functio
 
     $profile = app(PuttingProfile::class);
 
-    expect(array_column($profile->build(app(PuttStats::class)), 'key'))
+    expect(array_column($profile->build(stats()), 'key'))
         ->toBe(['short', 'mid', 'lag', 'speed', 'line']);
 
     logCause(6, PuttResult::MissRight, LineMissCause::Read);
 
-    expect(array_column($profile->build(app(PuttStats::class)), 'key'))
+    expect(array_column($profile->build(stats()), 'key'))
         ->toBe(['short', 'mid', 'lag', 'speed', 'stroke', 'read']);
 });
 
@@ -100,7 +81,7 @@ it('extrapolates the classified sample across every line miss on the radar', fun
     logCause(10, PuttResult::MissLeft, LineMissCause::Stroke);
     logCause(10, PuttResult::MissLeft, null);
 
-    $axes = app(PuttingProfile::class)->build(app(PuttStats::class));
+    $axes = app(PuttingProfile::class)->build(stats());
     $stroke = collect($axes)->firstWhere('key', 'stroke');
 
     // All 20 count as strokes, not just the 10 that were labelled: 20 of 100 putts.
@@ -109,18 +90,18 @@ it('extrapolates the classified sample across every line miss on the radar', fun
 
 it('credits the putter that squares the face rather than the one that reads greens', function () {
     // Same line-miss count each; the mallet's are mostly misreads, so its stroke is better.
-    logPutts(180, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
-    logCause(36, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, Putter::Blade);
-    logCause(4, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, Putter::Blade);
+    logPutts(180, PuttResult::Sunk, 10, PuttContext::Inside, blade());
+    logCause(36, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, blade());
+    logCause(4, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, blade());
 
-    logPutts(180, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Mallet);
-    logCause(8, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, Putter::Mallet);
-    logCause(32, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, Putter::Mallet);
+    logPutts(180, PuttResult::Sunk, 10, PuttContext::Inside, mallet());
+    logCause(8, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, mallet());
+    logCause(32, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, mallet());
 
-    $strengths = app(PutterComparison::class)->strengths();
+    $strengths = comparison()->strengths();
 
-    expect(array_column($strengths[Putter::Mallet->value], 'headline'))->toContain('Squares the face')
-        ->and(array_column($strengths[Putter::Blade->value], 'headline'))->not->toContain('Squares the face');
+    expect(array_column($strengths[mallet()->id], 'headline'))->toContain('Squares the face')
+        ->and(array_column($strengths[blade()->id], 'headline'))->not->toContain('Squares the face');
 });
 
 it('calls out whether real greens expose the read', function () {
@@ -130,12 +111,11 @@ it('calls out whether real greens expose the read', function () {
     logCause(3, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Outside);
     logCause(15, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Outside);
 
-    expect(implode(' ', app(PuttStats::class)->insights()))
+    expect(implode(' ', stats()->insights()))
         ->toContain('exposing the read');
 });
 
 it('drops a cause sent on a result that cannot have one', function () {
-    Challenge::factory()->create();
 
     $this->postJson(route('api.putts.sync'), [
         'putts' => [puttPayload(['result' => 'sunk', 'miss_cause' => 'read'])],
@@ -145,7 +125,6 @@ it('drops a cause sent on a result that cannot have one', function () {
 });
 
 it('stores a cause on a line miss and rejects an unknown one', function () {
-    Challenge::factory()->create();
 
     $this->postJson(route('api.putts.sync'), [
         'putts' => [puttPayload(['result' => 'miss_left', 'miss_cause' => 'stroke'])],
@@ -159,7 +138,6 @@ it('stores a cause on a line miss and rejects an unknown one', function () {
 });
 
 it('still accepts a putt with no cause at all', function () {
-    Challenge::factory()->create();
 
     $this->postJson(route('api.putts.sync'), [
         'putts' => [puttPayload(['result' => 'miss_left'])],
@@ -171,41 +149,41 @@ it('still accepts a putt with no cause at all', function () {
 it('keeps both compared putters on the same radar axes', function () {
     // The blade clears the classification threshold; the mallet does not. Overlaying
     // a hexagon on a pentagon would misalign every axis, so neither may split.
-    logPutts(60, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
-    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, Putter::Blade);
+    logPutts(60, PuttResult::Sunk, 10, PuttContext::Inside, blade());
+    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, blade());
 
-    logPutts(60, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Mallet);
-    logCause(3, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, Putter::Mallet);
+    logPutts(60, PuttResult::Sunk, 10, PuttContext::Inside, mallet());
+    logCause(3, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Inside, mallet());
 
-    $profiles = app(PutterComparison::class)->profiles();
+    $profiles = comparison()->profiles();
 
-    $bladeKeys = array_column($profiles[Putter::Blade->value], 'key');
-    $malletKeys = array_column($profiles[Putter::Mallet->value], 'key');
+    $bladeKeys = array_column($profiles[blade()->id], 'key');
+    $malletKeys = array_column($profiles[mallet()->id], 'key');
 
     expect($bladeKeys)->toBe($malletKeys)
         ->and($bladeKeys)->toBe(['short', 'mid', 'lag', 'speed', 'line']);
 });
 
 it('splits both radar shapes once both putters qualify', function () {
-    foreach ([Putter::Blade, Putter::Mallet] as $putter) {
+    foreach ([blade(), mallet()] as $putter) {
         logPutts(60, PuttResult::Sunk, 10, PuttContext::Inside, $putter);
         logCause(12, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Inside, $putter);
     }
 
-    $profiles = app(PutterComparison::class)->profiles();
+    $profiles = comparison()->profiles();
 
-    expect(array_column($profiles[Putter::Blade->value], 'key'))
+    expect(array_column($profiles[blade()->id], 'key'))
         ->toBe(['short', 'mid', 'lag', 'speed', 'stroke', 'read'])
-        ->and(array_column($profiles[Putter::Mallet->value], 'key'))
+        ->and(array_column($profiles[mallet()->id], 'key'))
         ->toBe(['short', 'mid', 'lag', 'speed', 'stroke', 'read']);
 });
 
 it('renders the compare page when only one putter has classified misses', function () {
-    logPutts(60, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Blade);
-    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Outside, Putter::Blade);
+    logPutts(60, PuttResult::Sunk, 10, PuttContext::Outside, blade());
+    logCause(20, PuttResult::MissLeft, LineMissCause::Stroke, PuttContext::Outside, blade());
 
-    logPutts(60, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Mallet);
-    logCause(4, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Outside, Putter::Mallet);
+    logPutts(60, PuttResult::Sunk, 10, PuttContext::Outside, mallet());
+    logCause(4, PuttResult::MissLeft, LineMissCause::Read, PuttContext::Outside, mallet());
 
     $this->get(route('stats.compare', ['context' => 'outside']))
         ->assertOk()

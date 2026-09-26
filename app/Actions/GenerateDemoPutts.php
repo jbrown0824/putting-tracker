@@ -5,12 +5,14 @@ namespace App\Actions;
 use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
+use App\Enums\PutterHeadType;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
-use App\Models\Challenge;
+use App\Enums\SurfaceType;
 use App\Models\Putt;
+use App\Models\Putter;
 use App\Models\PuttingSession;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -39,8 +41,8 @@ class GenerateDemoPutts
     ];
 
     /**
-     * Deltas applied on top of the base profile so the two putters behave differently
-     * enough for the comparison page to have something real to find.
+     * Deltas applied on top of the base profile so the two demo putters behave
+     * differently enough for the comparison page to have something real to find.
      *
      * Modelled on how the heads actually differ: a mallet's higher MOI resists twisting
      * on an off-centre strike, so fewer of its misses are left or right and a larger
@@ -85,7 +87,8 @@ class GenerateDemoPutts
     private const INDOOR_FLAT_SHARE = 88;
 
     /**
-     * Wipe existing putts and generate a fresh random dataset.
+     * Wipe one player's putts and generate a fresh random dataset for them, hit
+     * with a demo blade and a demo mallet (created if they do not exist yet).
      *
      * Nothing on a putt says whether a human or this seeder logged it, so the
      * guard cannot be selective: it refuses to delete anything at all unless the
@@ -98,13 +101,13 @@ class GenerateDemoPutts
      * @throws \RuntimeException when putts already exist and no replacement was asked for
      */
     public function execute(
+        User $user,
         int $days = 14,
         ?string $profileName = null,
-        bool $alignChallengeWindow = true,
         bool $replaceExisting = false,
     ): array {
         $profile = $this->resolveProfile($profileName);
-        $existing = Putt::query()->count();
+        $existing = $user->putts()->count();
 
         if ($existing > 0 && ! $replaceExisting) {
             throw new \RuntimeException(sprintf(
@@ -113,19 +116,20 @@ class GenerateDemoPutts
             ));
         }
 
-        Putt::query()->delete();
-        PuttingSession::query()->delete();
+        $user->putts()->delete();
+        $user->puttingSessions()->delete();
+
+        $putters = [
+            PutterHeadType::Blade->value => $this->demoPutter($user, 'Demo blade', PutterHeadType::Blade),
+            PutterHeadType::Mallet->value => $this->demoPutter($user, 'Demo mallet', PutterHeadType::Mallet),
+        ];
 
         $endsOn = Carbon::today();
         $startsOn = $endsOn->copy()->subDays($days - 1);
 
-        if ($alignChallengeWindow) {
-            $this->alignChallengeTo($startsOn);
-        }
-
         $rows = [];
         $sessionCount = 0;
-        $perPutter = [Putter::Blade->value => 0, Putter::Mallet->value => 0];
+        $perPutter = [PutterHeadType::Blade->value => 0, PutterHeadType::Mallet->value => 0];
 
         for ($day = 0; $day < $days; $day++) {
             $date = $startsOn->copy()->addDays($day);
@@ -135,18 +139,20 @@ class GenerateDemoPutts
                 continue;
             }
 
-            foreach ($this->sessionPlanFor($date) as [$context, $putter, $startedAt, $volume]) {
-                $session = PuttingSession::query()->create([
+            foreach ($this->sessionPlanFor($date) as [$context, $headType, $startedAt, $volume]) {
+                $putter = $putters[$headType->value];
+
+                $session = $user->puttingSessions()->create([
+                    'putter_id' => $putter->id,
                     'context' => $context,
-                    'putter' => $putter,
+                    'surface_type' => $context === PuttContext::Outside ? SurfaceType::PracticeGreen : SurfaceType::Mat,
                     'location' => $context === PuttContext::Outside ? $this->randomLocation() : null,
-                    'surface' => $context === PuttContext::Outside ? 'practice green' : 'carpet',
                     'started_at' => $startedAt,
                 ]);
 
                 $sessionCount++;
-                $perPutter[$putter->value] += $volume;
-                $putterProfile = $this->applyPutterModifier($profile, $putter);
+                $perPutter[$headType->value] += $volume;
+                $putterProfile = $this->applyPutterModifier($profile, $headType);
 
                 // Practice happens in spots: you stand somewhere, hit a handful, then
                 // move. Rolling a position per putt would scatter them in a way no
@@ -223,8 +229,16 @@ class GenerateDemoPutts
         ];
     }
 
+    private function demoPutter(User $user, string $name, PutterHeadType $headType): Putter
+    {
+        return $user->putters()->firstOrCreate(
+            ['name' => $name],
+            ['head_type' => $headType, 'sort_order' => (int) $user->putters()->max('sort_order') + 1],
+        );
+    }
+
     /**
-     * @return array<int, array{0: PuttContext, 1: Putter, 2: Carbon, 3: int}>
+     * @return array<int, array{0: PuttContext, 1: PutterHeadType, 2: Carbon, 3: int}>
      */
     private function sessionPlanFor(Carbon $date): array
     {
@@ -238,18 +252,18 @@ class GenerateDemoPutts
         return $plan;
     }
 
-    private function randomPutter(): Putter
+    private function randomPutter(): PutterHeadType
     {
-        return mt_rand(1, 100) <= self::BLADE_SESSION_SHARE ? Putter::Blade : Putter::Mallet;
+        return mt_rand(1, 100) <= self::BLADE_SESSION_SHARE ? PutterHeadType::Blade : PutterHeadType::Mallet;
     }
 
     /**
      * @param  array<string, mixed>  $profile
      * @return array<string, mixed>
      */
-    private function applyPutterModifier(array $profile, Putter $putter): array
+    private function applyPutterModifier(array $profile, PutterHeadType $headType): array
     {
-        foreach (self::PUTTER_MODIFIERS[$putter->value] as $key => $delta) {
+        foreach (self::PUTTER_MODIFIERS[$headType->value] as $key => $delta) {
             $profile[$key] += $delta;
         }
 
@@ -268,12 +282,14 @@ class GenerateDemoPutts
 
         return [
             'uuid' => (string) Str::uuid(),
+            'user_id' => $session->user_id,
             'putting_session_id' => $session->id,
+            'putter_id' => $putter->id,
             'distance_ft' => $distance,
             'result' => $result->value,
             'miss_cause' => $this->rollMissCause($result, $context, $profile)?->value,
             'context' => $context->value,
-            'putter' => $putter->value,
+            'surface_type' => $session->surface_type?->value,
             // Derived rather than rolled, exactly as RecordPutts derives it, so the
             // seeded data cannot contradict itself.
             'slope' => $position->slope()->value,
@@ -387,18 +403,5 @@ class GenerateDemoPutts
         $spots = ['Home green', 'Muni practice green', 'Country club', 'Range putting green', 'Backyard'];
 
         return $spots[array_rand($spots)];
-    }
-
-    /**
-     * Demo data only makes sense inside the challenge window, so widen the window
-     * backwards to cover it. Re-run ChallengeSeeder to restore the real dates.
-     */
-    private function alignChallengeTo(Carbon $startsOn): void
-    {
-        $challenge = Challenge::current();
-
-        if ($challenge !== null && $startsOn->lessThan($challenge->start_date)) {
-            $challenge->update(['start_date' => $startsOn->toDateString()]);
-        }
     }
 }

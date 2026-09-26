@@ -5,12 +5,15 @@ paths:
 
 # Services
 
-## Challenge progress is putter-agnostic; performance stats are not
-PuttStats::forPutter() scopes missDial, speedVsLine, byDistance and insights (and anything derived from them) to one putter via baseQuery().
+## Challenge progress is read from the putts, never stamped onto them
+ChallengeProgress decides which putts count by querying Challenge::eligiblePutts() (window, putters, contexts, surface types, distance) and then ChallengeGoal::covers(). Nothing links a putt to a challenge. That is what lets challenges stack — one putt counts toward every challenge it fits — and lets an edited filter recount history. Do not add a challenge_putt table or cache per-putt eligibility.
 
-progress() and dailyVolume() deliberately keep using Putt::query() and stay combined, even on a scoped instance. The challenge is a volume goal — every putt counts towards 2,000 no matter which putter hit it. Splitting it would mean neither putter ever reaches the target.
+Challenge progress is deliberately separate from PuttStats. PuttStats scopes performance (putter, context, session, position) and must be user-scoped with forUser() or it throws; ChallengeProgress applies the challenge's own filters instead.
 
-If you add a method to PuttStats, decide which side it belongs on and use baseQuery() unless it feeds the challenge.
+Days are the player's calendar days (users.timezone), grouped in PHP. Compare stored challenge dates as date strings (Challenge::hasStarted/hasEnded), never as Carbon instants — a user-timezone "today" against a UTC-midnight date shifts a challenge by a day either side of UTC.
+
+## DrillEngine and resources/js/drill.js are one rule set in two languages
+The phone runs drill.js to guide each putt offline; SettleDrillRuns replays the run's putts through DrillEngine to decide whether it finished. A rule changed on one side only means the phone congratulates runs the server will not count. Change both, and extend DrillEngineTest.
 
 ## Compare make rates through AdjustedRate, never raw
 A raw make rate is confounded by shot mix: hitting more short putts with one putter raises its number without the stroke improving. Any comparison between two scopes (putter vs putter, week vs week, inside vs outside) must go through AdjustedRate, which does direct standardisation over distance band x context x slope band.
