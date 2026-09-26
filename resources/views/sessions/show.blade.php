@@ -4,7 +4,7 @@
 
 @section('content')
     <div class="flex items-center justify-between pt-2">
-        <h1 class="text-lg font-medium">{{ $session->started_at->format('M j, g:ia') }}</h1>
+        <h1 class="text-lg font-medium">{{ $session->started_at->tz(auth()->user()->timezone)->format('M j, g:ia') }}</h1>
         <form method="POST" action="{{ route('sessions.destroy', $session) }}"
               onsubmit="return confirm('Delete this session and all its putts?')">
             @csrf
@@ -14,9 +14,8 @@
     </div>
 
     <p class="mt-1 text-[11px] text-slate-500">
-        {{ $session->context->label() }} · {{ $session->putter->label() }}
+        {{ $session->whereLabel() }} · {{ $session->putter->name }}
         @if ($session->location) · {{ $session->location }} @endif
-        @if ($session->surface) · {{ $session->surface }} @endif
     </p>
 
     <a href="{{ route('stats', ['session' => $session]) }}" class="mt-2 inline-block text-xs text-emerald-400">
@@ -40,7 +39,7 @@
                     @endif
                 </div>
                 <div class="flex items-center gap-3">
-                    <span class="text-[10px] text-slate-600">{{ $putt->hit_at->format('g:ia') }}</span>
+                    <span class="text-[10px] text-slate-600">{{ $putt->hit_at->tz(auth()->user()->timezone)->format('g:ia') }}</span>
                     <form method="POST" action="{{ route('sessions.putts.destroy', [$session, $putt]) }}">
                         @csrf
                         @method('DELETE')

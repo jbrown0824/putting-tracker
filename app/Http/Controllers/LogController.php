@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Challenge;
-use App\Services\PuttStats;
+use App\Services\PracticeSummary;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\Request;
 
 class LogController extends Controller
 {
-    public function index(PuttStats $stats): View
+    public function index(Request $request, PracticeSummary $summary): View
     {
-        $challenge = Challenge::current();
+        $user = $request->user();
 
         return view('log', [
-            'challenge' => $challenge,
-            'progress' => $challenge !== null ? $stats->progress($challenge) : null,
+            'user' => $user,
+            'putters' => $user->putters()->active()->ordered()->get(),
+            'defaultPutter' => $user->defaultPutter(),
+            'progress' => $summary->for($user),
         ]);
     }
 }

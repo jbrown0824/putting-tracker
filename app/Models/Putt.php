@@ -5,9 +5,9 @@ namespace App\Models;
 use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
+use App\Enums\SurfaceType;
 use Database\Factories\PuttFactory;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
@@ -23,13 +23,16 @@ class Putt extends Model
     protected $fillable = [
         'uuid',
         'putting_session_id',
+        'putter_id',
         'distance_ft',
         'result',
         'miss_cause',
         'context',
-        'putter',
+        'surface_type',
         'slope',
         'clock_position',
+        'challenge_run_id',
+        'drill_step',
         'notes',
         'hit_at',
     ];
@@ -40,10 +43,11 @@ class Putt extends Model
             'result' => PuttResult::class,
             'miss_cause' => LineMissCause::class,
             'context' => PuttContext::class,
-            'putter' => Putter::class,
+            'surface_type' => SurfaceType::class,
             'slope' => PuttSlope::class,
             'clock_position' => ClockPosition::class,
             'distance_ft' => 'integer',
+            'drill_step' => 'integer',
             'hit_at' => 'datetime',
         ];
     }
@@ -54,11 +58,22 @@ class Putt extends Model
         return $this->belongsTo(PuttingSession::class, 'putting_session_id');
     }
 
-    /** @param Builder<Putt> $query */
-    #[Scope]
-    protected function forPutter(Builder $query, Putter $putter): Builder
+    /** @return BelongsTo<User, $this> */
+    public function user(): BelongsTo
     {
-        return $query->where('putter', $putter);
+        return $this->belongsTo(User::class);
+    }
+
+    /** @return BelongsTo<Putter, $this> */
+    public function putter(): BelongsTo
+    {
+        return $this->belongsTo(Putter::class);
+    }
+
+    /** @return BelongsTo<ChallengeRun, $this> */
+    public function challengeRun(): BelongsTo
+    {
+        return $this->belongsTo(ChallengeRun::class);
     }
 
     /** @param Builder<Putt> $query */

@@ -13,13 +13,12 @@
     @if ($session !== null)
         <div class="mt-3 rounded-lg bg-slate-900 p-3">
             <div class="flex items-baseline justify-between">
-                <span class="text-sm font-medium text-slate-100">{{ $session->started_at->format('M j, g:ia') }}</span>
+                <span class="text-sm font-medium text-slate-100">{{ $session->started_at->tz(auth()->user()->timezone)->format('M j, g:ia') }}</span>
                 <a href="{{ route('sessions.show', $session) }}" class="text-[11px] text-emerald-400">Every putt ›</a>
             </div>
             <div class="mt-1 text-[11px] text-slate-500">
-                {{ $session->context->label() }} · {{ $session->putter->label() }}
+                {{ $session->whereLabel() }} · {{ $session->putter->name }}
                 @if ($session->location) · {{ $session->location }} @endif
-                @if ($session->surface) · {{ $session->surface }} @endif
             </div>
             <div class="mt-2 text-sm text-slate-300">
                 {{ $totalPutts }} putts · {{ $dial['sunk']['count'] }} sunk
@@ -30,32 +29,21 @@
         @include('partials.putter-switch')
         @include('partials.context-switch')
 
-        @if ($progress === null)
-            <p class="mt-4 text-sm text-slate-400">No challenge configured yet.</p>
-        @else
-            <div class="mt-3 grid grid-cols-3 gap-2">
-                @foreach ([
-                    ['Putts', $progress['total'], '/ '.$progress['target_total']],
-                    ['Outside', $progress['outside'], '/ '.$progress['target_outside_min']],
-                    [$putter->label().' make', $dial['sunk']['percent'].'%', null],
-                ] as [$label, $value, $suffix])
-                    <div class="rounded-lg bg-slate-900 p-3">
-                        <div class="text-[11px] text-slate-500">{{ $label }}</div>
-                        <div class="mt-0.5 whitespace-nowrap text-base font-medium">
-                            {{ $value }}@if ($suffix)<span class="text-[11px] font-normal text-slate-500"> {{ $suffix }}</span>@endif
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-
-            <div class="mt-2 rounded-lg bg-slate-900 p-3 text-xs text-slate-400">
-                {{ $progress['days_remaining'] }} days left · {{ $progress['per_day_needed'] }} putts/day
-                ({{ $progress['outside_per_day_needed'] }}/day outside) to finish
-                <span class="mt-1 block text-[11px] text-slate-600">
-                    Challenge totals count every putt. Everything below is {{ $putter->label() }}{{ $context !== null ? ', '.strtolower($context->label()).' only' : ' only' }}.
-                </span>
-            </div>
-        @endif
+        <div class="mt-3 grid grid-cols-3 gap-2">
+            @foreach ([
+                ['Putts', $totalPutts],
+                ['Sunk', $dial['sunk']['count']],
+                ['Make', $dial['sunk']['percent'].'%'],
+            ] as [$label, $value])
+                <div class="rounded-lg bg-slate-900 p-3">
+                    <div class="text-[11px] text-slate-500">{{ $label }}</div>
+                    <div class="mt-0.5 whitespace-nowrap text-base font-medium">{{ $value }}</div>
+                </div>
+            @endforeach
+        </div>
+        <p class="mt-1 text-[11px] text-slate-600">
+            Showing {{ $putter?->name ?? 'all putters' }}{{ $context !== null ? ', '.strtolower($context->label()).' only' : '' }}.
+        </p>
     @endif
 
         @if ($totalPutts > 0 && $adjusted['reliable'])
@@ -116,7 +104,7 @@
 
                 @include('partials.putting-profile', [
                     'shapes' => [[
-                        'label' => $session !== null ? 'This session' : $putter->label(),
+                        'label' => $session !== null ? 'This session' : ($putter?->name ?? 'All putters'),
                         'colour' => 'rgb(16 185 129)',
                         'axes' => $profileAxes,
                     ]],
@@ -316,7 +304,7 @@
             @if ($insideVsOutside->isNotEmpty())
                 <section class="mt-6">
                     <h2 class="text-sm font-medium text-slate-300">Inside vs. outside by distance</h2>
-                    <p class="mt-1 text-[11px] text-slate-500">{{ $putter->label() }} only, at distances you have played in both.</p>
+                    <p class="mt-1 text-[11px] text-slate-500">{{ $putter !== null ? $putter->name.' only' : 'All putters' }}, at distances you have played in both.</p>
                     <div class="mt-2 space-y-2">
                         @foreach ($insideVsOutside as $row)
                             <div>
@@ -344,8 +332,8 @@
             @endif
         @else
             <p class="mt-6 rounded-lg bg-slate-900 p-4 text-sm text-slate-400">
-                No {{ $context !== null ? strtolower($context->label()).' ' : '' }}putts logged with the {{ strtolower($putter->label()) }} yet.
-                Head to the Log tab, switch to it, and start tapping.
+                No {{ $context !== null ? strtolower($context->label()).' ' : '' }}putts logged{{ $putter !== null ? ' with '.$putter->name : '' }} yet.
+                Head to the Log tab and start tapping.
             </p>
         @endif
 
@@ -353,39 +341,4 @@
             @include('partials.context-breakdown')
         @endif
 
-        {{-- The pace line is a challenge-window chart, so it has nothing to say about one session. --}}
-        @if ($session === null && $dailyVolume->isNotEmpty())
-            @php
-                $maxCumulative = max(
-                    $dailyVolume->max('target_cumulative') ?: 1,
-                    $dailyVolume->filter(fn ($d) => $d['cumulative'] !== null)->max('cumulative') ?: 1,
-                );
-                $days = $dailyVolume->values();
-                $step = $days->count() > 1 ? 300 / ($days->count() - 1) : 0;
-                $point = fn ($value, $index) => round($index * $step, 2).','.round(110 - ($value / $maxCumulative) * 100, 2);
-                $targetLine = $days->map(fn ($d, $i) => $point($d['target_cumulative'], $i))->implode(' ');
-                $actualDays = $days->filter(fn ($d) => $d['cumulative'] !== null)->values();
-                $actualLine = $actualDays->map(fn ($d, $i) => $point($d['cumulative'], $i))->implode(' ');
-            @endphp
-            <section class="mt-6 mb-4">
-                <h2 class="text-sm font-medium text-slate-300">Pace</h2>
-                <p class="mt-1 text-[11px] text-slate-500">Your cumulative total against the pace needed to finish.</p>
-                <div class="mt-2 rounded-lg bg-slate-900 p-3">
-                    <svg viewBox="0 0 300 120" class="w-full" role="img" aria-label="Cumulative putts against required pace">
-                        <polyline points="{{ $targetLine }}" fill="none" stroke="rgb(71 85 105)" stroke-width="1.5" stroke-dasharray="4 3"/>
-                        @if ($actualDays->count() > 1)
-                            <polyline points="{{ $actualLine }}" fill="none" stroke="rgb(16 185 129)" stroke-width="2.5"/>
-                        @elseif ($actualDays->count() === 1)
-                            <circle cx="0" cy="{{ round(110 - ($actualDays[0]['cumulative'] / $maxCumulative) * 100, 2) }}" r="3" fill="rgb(16 185 129)"/>
-                        @endif
-                    </svg>
-                    <div class="mt-1 flex justify-between text-[10px] text-slate-600">
-                        <span>{{ $days->first()['label'] }}</span>
-                        <span class="text-emerald-500">— you</span>
-                        <span class="text-slate-500">--- target</span>
-                        <span>{{ $days->last()['label'] }}</span>
-                    </div>
-                </div>
-            </section>
-        @endif
 @endsection

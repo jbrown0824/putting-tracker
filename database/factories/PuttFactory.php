@@ -4,7 +4,6 @@ namespace Database\Factories;
 
 use App\Enums\ClockPosition;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Models\Putt;
 use App\Models\PuttingSession;
@@ -20,12 +19,13 @@ class PuttFactory extends Factory
         return [
             'uuid' => (string) Str::uuid(),
             'putting_session_id' => PuttingSession::factory(),
+            // Owner and putter follow the session, so a factory putt is always consistent with it.
+            'user_id' => fn (array $attributes): int => PuttingSession::query()->findOrFail($attributes['putting_session_id'])->user_id,
+            'putter_id' => fn (array $attributes): int => PuttingSession::query()->findOrFail($attributes['putting_session_id'])->putter_id,
             'distance_ft' => fake()->randomElement([3, 5, 8, 10, 12, 15, 20]),
             'result' => fake()->randomElement(PuttResult::cases()),
             'context' => PuttContext::Inside,
-            'putter' => Putter::Blade,
-            // Null by default so a factory-built putt looks like the historical rows
-            // that predate positions — tests have to opt in to a tagged putt.
+            // Null by default so tests have to opt in to a tagged putt.
             'clock_position' => null,
             'hit_at' => Carbon::now(),
         ];
@@ -47,11 +47,6 @@ class PuttFactory extends Factory
     public function outside(): static
     {
         return $this->state(fn () => ['context' => PuttContext::Outside]);
-    }
-
-    public function mallet(): static
-    {
-        return $this->state(fn () => ['putter' => Putter::Mallet]);
     }
 
     public function atDistance(int $feet): static

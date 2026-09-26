@@ -5,11 +5,13 @@ namespace App\Actions;
 use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
-use App\Models\Putt;
+use App\Enums\SurfaceType;
+use App\Models\Putter;
+use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class RecordPutts
@@ -20,43 +22,41 @@ class RecordPutts
      * Persist a batch of putts from the client queue.
      *
      * The client generates each uuid, so replaying a batch after a dropped
-     * connection updates the existing row instead of duplicating it.
+     * connection updates the existing row instead of duplicating it. Uuids are
+     * unique per player, so nobody else's putt can ever be overwritten.
      *
      * @param  array<int, array<string, mixed>>  $putts
      * @return array<int, string> the uuids that are now stored
      */
-    public function execute(array $putts): array
+    public function execute(User $user, array $putts): array
     {
-        return DB::transaction(function () use ($putts): array {
+        $putters = $user->putters()->get()->keyBy('id');
+
+        return DB::transaction(function () use ($user, $putts, $putters): array {
             $stored = [];
 
             foreach ($putts as $putt) {
                 $hitAt = Carbon::parse($putt['hit_at']);
                 $context = PuttContext::from($putt['context']);
-
-                // Clients queue putts offline, so a bundle predating putter tracking
-                // can still post batches without one.
-                $putter = isset($putt['putter'])
-                    ? Putter::from($putt['putter'])
-                    : Putter::default();
-
+                $surfaceType = $this->resolveSurfaceType($putt, $context);
+                $putter = $this->resolvePutter($user, $putters, $putt);
                 $result = PuttResult::from($putt['result']);
                 $position = $this->resolvePosition($putt);
 
-                $session = $this->resolveSession->execute($context, $putter, $hitAt, [
+                $session = $this->resolveSession->execute($user, $context, $surfaceType, $putter, $hitAt, [
                     'location' => $putt['location'] ?? null,
-                    'surface' => $putt['surface'] ?? null,
                 ]);
 
-                Putt::query()->updateOrCreate(
+                $user->putts()->updateOrCreate(
                     ['uuid' => $putt['uuid']],
                     [
                         'putting_session_id' => $session->id,
+                        'putter_id' => $putter->id,
                         'distance_ft' => $putt['distance_ft'],
                         'result' => $result,
                         'miss_cause' => $this->resolveMissCause($putt, $result),
                         'context' => $context,
-                        'putter' => $putter,
+                        'surface_type' => $surfaceType,
                         'slope' => $this->resolveSlope($putt, $position),
                         'clock_position' => $position,
                         'notes' => $putt['notes'] ?? null,
@@ -69,6 +69,34 @@ class RecordPutts
 
             return $stored;
         });
+    }
+
+    /**
+     * The putter the phone named, or the player's default when it named none or
+     * one that is not theirs any more. A queued putt is never rejected over its
+     * putter, or it would sit in the phone's queue failing forever.
+     *
+     * @param  Collection<int, Putter>  $putters
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolvePutter(User $user, Collection $putters, array $putt): Putter
+    {
+        $putter = isset($putt['putter_id']) ? $putters->get((int) $putt['putter_id']) : null;
+
+        return $putter ?? $user->defaultPutter();
+    }
+
+    /**
+     * A surface type that contradicts the context is dropped rather than rejected:
+     * the context is the fact every stat depends on, the surface only refines it.
+     *
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolveSurfaceType(array $putt, PuttContext $context): ?SurfaceType
+    {
+        $type = isset($putt['surface_type']) ? SurfaceType::from($putt['surface_type']) : null;
+
+        return $type?->context() === $context ? $type : null;
     }
 
     /**
@@ -96,10 +124,7 @@ class RecordPutts
 
     /**
      * The clock position already fixes the slope, so it wins whenever one was sent.
-     *
-     * A client running a bundle from before the ring existed still posts its own
-     * slope, and that is kept rather than discarded — the field stays populated
-     * across the changeover instead of going dark for the putts in flight.
+     * A stale client that sent only a slope keeps it rather than losing it.
      *
      * @param  array<string, mixed>  $putt
      */

@@ -1,7 +1,13 @@
 import Alpine from 'alpinejs';
 
-const QUEUE_KEY = 'putt-queue';
-const PREFS_KEY = 'putt-prefs';
+/**
+ * Storage is keyed per player, so two people sharing a phone can never post each
+ * other's queued putts. The pre-accounts keys are dropped on load: their putts
+ * belonged to a database that has since been reset.
+ */
+const queueKey = (userId) => `putt-queue:${userId}`;
+const prefsKey = (userId) => `putt-prefs:${userId}`;
+const LEGACY_KEYS = ['putt-queue', 'putt-prefs'];
 
 /**
  * How long the dial stays lit up and unclickable after a tap. Long enough to read
@@ -41,23 +47,27 @@ function csrf() {
     return document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 }
 
-Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
+Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     ladder,
     clockRing: clock.ring,
     clockLabels: clock.labels,
+    userId: setup.userId,
+    putters: setup.putters,
+    surfaceTypes: setup.surfaceTypes,
     distance: 10,
     context: 'inside',
-    putter: 'blade',
+    putterId: setup.defaultPutterId,
+    surfaceType: null,
     clockPosition: 'flat',
     ringOpen: false,
     location: '',
-    surface: '',
     advancedOpen: false,
     advancedMisses: false,
     queue: [],
     recent: [],
     synced: initialProgress ?? {},
     syncing: false,
+    signedOut: false,
     online: navigator.onLine,
     awake: false,
     wakeLock: null,
@@ -66,15 +76,24 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
     locked: false,
 
     init() {
-        const prefs = read(PREFS_KEY, {});
+        LEGACY_KEYS.forEach((key) => {
+            try {
+                localStorage.removeItem(key);
+            } catch {
+                // Storage unavailable; nothing to clean up.
+            }
+        });
+
+        const prefs = read(prefsKey(this.userId), {});
         this.distance = prefs.distance ?? 10;
         this.context = prefs.context ?? 'inside';
-        this.putter = prefs.putter ?? 'blade';
+        // A remembered putter may since have been retired or deleted.
+        this.putterId = this.putters.some((p) => p.id === prefs.putterId) ? prefs.putterId : setup.defaultPutterId;
+        this.surfaceType = this.surfaceOptions.some((t) => t.value === prefs.surfaceType) ? prefs.surfaceType : null;
         this.clockPosition = prefs.clockPosition ?? 'flat';
         this.advancedMisses = prefs.advancedMisses ?? false;
         this.location = prefs.location ?? '';
-        this.surface = prefs.surface ?? '';
-        this.queue = read(QUEUE_KEY, []);
+        this.queue = read(queueKey(this.userId), []);
 
         window.addEventListener('online', () => {
             this.online = true;
@@ -108,7 +127,15 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
      * still reaches back across a switch.
      */
     get sessionPutts() {
-        return this.recent.filter((p) => p.putter === this.putter);
+        return this.recent.filter((p) => p.putter_id === this.putterId);
+    },
+
+    get putterName() {
+        return this.putters.find((p) => p.id === this.putterId)?.name ?? '';
+    },
+
+    get surfaceOptions() {
+        return this.surfaceTypes[this.context] ?? [];
     },
 
     get sessionCount() {
@@ -128,14 +155,14 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
     },
 
     savePrefs() {
-        write(PREFS_KEY, {
+        write(prefsKey(this.userId), {
             distance: this.distance,
             context: this.context,
-            putter: this.putter,
+            putterId: this.putterId,
+            surfaceType: this.surfaceType,
             clockPosition: this.clockPosition,
             advancedMisses: this.advancedMisses,
             location: this.location,
-            surface: this.surface,
         });
     },
 
@@ -150,7 +177,17 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
             this.clockPosition = 'flat';
         }
 
+        // Every surface type belongs to one context, so crossing over clears it.
+        if (context !== this.context) {
+            this.surfaceType = null;
+        }
+
         this.context = context;
+        this.savePrefs();
+    },
+
+    setSurfaceType(type) {
+        this.surfaceType = this.surfaceType === type ? null : type;
         this.savePrefs();
     },
 
@@ -182,8 +219,8 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
         this.savePrefs();
     },
 
-    setPutter(putter) {
-        this.putter = putter;
+    setPutter(putterId) {
+        this.putterId = putterId;
         this.savePrefs();
     },
 
@@ -235,16 +272,16 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
             result,
             miss_cause: cause,
             context: this.context,
-            putter: this.putter,
+            surface_type: this.surfaceType,
+            putter_id: this.putterId,
             clock_position: this.clockPosition || null,
             location: this.location || null,
-            surface: this.surface || null,
             hit_at: new Date().toISOString(),
         };
 
         this.queue.push(putt);
         this.recent.unshift(putt);
-        write(QUEUE_KEY, this.queue);
+        write(queueKey(this.userId), this.queue);
 
         this.flash = result;
         this.flashCause = cause;
@@ -268,19 +305,23 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
 
         if (queued !== -1) {
             this.queue.splice(queued, 1);
-            write(QUEUE_KEY, this.queue);
+            write(queueKey(this.userId), this.queue);
         } else {
-            this.synced.total = Math.max(0, (this.synced.total ?? 0) - 1);
-            this.synced.sunk = Math.max(0, (this.synced.sunk ?? 0) - (last.result === 'sunk' ? 1 : 0));
+            const sunk = last.result === 'sunk' ? 1 : 0;
 
-            if (last.context === 'outside') {
-                this.synced.outside = Math.max(0, (this.synced.outside ?? 0) - 1);
-            }
+            ['today', 'week'].forEach((period) => {
+                const tally = this.synced[period];
+
+                if (tally) {
+                    tally.total = Math.max(0, tally.total - 1);
+                    tally.sunk = Math.max(0, tally.sunk - sunk);
+                }
+            });
 
             try {
                 await fetch(`/api/putts/${last.uuid}`, {
                     method: 'DELETE',
-                    headers: { 'X-CSRF-TOKEN': csrf() },
+                    headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
                 });
             } catch {
                 // Rolled back locally; the row is removed on the next connection.
@@ -290,32 +331,22 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
 
     /**
      * The server snapshot plus anything still sitting in the local queue, so the
-     * counter never jumps backwards when a batch syncs.
+     * counter never jumps backwards when a batch syncs. Queued putts are recent by
+     * nature, so they are simply added to both periods.
      */
     get progress() {
         const base = this.synced ?? {};
         const queued = this.queue.length;
-        const queuedOutside = this.queue.filter((p) => p.context === 'outside').length;
         const queuedSunk = this.queue.filter((p) => p.result === 'sunk').length;
-
-        const total = (base.total ?? 0) + queued;
-        const outside = (base.outside ?? 0) + queuedOutside;
-        const targetTotal = base.target_total ?? 0;
-        const targetOutside = base.target_outside_min ?? 0;
-        const days = base.days_remaining ?? 0;
-        const remaining = Math.max(0, targetTotal - total);
-        const outsideRemaining = Math.max(0, targetOutside - outside);
+        const add = (tally) => ({
+            total: (tally?.total ?? 0) + queued,
+            sunk: (tally?.sunk ?? 0) + queuedSunk,
+        });
 
         return {
             ...base,
-            total,
-            outside,
-            sunk: (base.sunk ?? 0) + queuedSunk,
-            remaining,
-            outside_remaining: outsideRemaining,
-            per_day_needed: days > 0 ? Math.ceil(remaining / days) : remaining,
-            outside_per_day_needed: days > 0 ? Math.ceil(outsideRemaining / days) : outsideRemaining,
-            percent_complete: targetTotal ? Math.round((total / targetTotal) * 1000) / 10 : 0,
+            today: add(base.today),
+            week: add(base.week),
         };
     },
 
@@ -339,11 +370,15 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock) => ({
                 body: JSON.stringify({ putts: batch }),
             });
 
+            // Logged out, or the session behind the CSRF token expired. The queue is
+            // kept exactly as it is and posts again once the player logs back in.
+            this.signedOut = response.status === 401 || response.status === 419;
+
             if (response.ok) {
                 const data = await response.json();
                 const stored = new Set(data.stored ?? []);
                 this.queue = this.queue.filter((p) => !stored.has(p.uuid));
-                write(QUEUE_KEY, this.queue);
+                write(queueKey(this.userId), this.queue);
 
                 if (data.progress) {
                     this.synced = data.progress;

@@ -1,22 +1,20 @@
 <?php
 
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
-use App\Services\PutterComparison;
 
 it('compares only distances both putters have played enough', function () {
-    logMakeRate(100, 50, 10, Putter::Blade);
-    logMakeRate(100, 60, 10, Putter::Mallet);
+    logMakeRate(100, 50, 10, blade());
+    logMakeRate(100, 60, 10, mallet());
 
     // Blade only. Should never reach the matched set, however good it looks.
-    logMakeRate(100, 95, 3, Putter::Blade);
+    logMakeRate(100, 95, 3, blade());
 
     // Played by both, but too thin on the mallet side to trust.
-    logMakeRate(20, 40, 25, Putter::Blade);
-    logMakeRate(3, 100, 25, Putter::Mallet);
+    logMakeRate(20, 40, 25, blade());
+    logMakeRate(3, 100, 25, mallet());
 
-    $rows = app(PutterComparison::class)->byDistance();
+    $rows = comparison()->byDistance();
 
     expect($rows)->toHaveCount(1)
         ->and($rows[0]['distance_ft'])->toBe(10)
@@ -24,43 +22,43 @@ it('compares only distances both putters have played enough', function () {
 });
 
 it('weights a matched distance by the smaller of the two attempt counts', function () {
-    logMakeRate(100, 50, 10, Putter::Blade);
-    logMakeRate(20, 50, 10, Putter::Mallet);
+    logMakeRate(100, 50, 10, blade());
+    logMakeRate(20, 50, 10, mallet());
 
-    $rows = app(PutterComparison::class)->byDistance();
+    $rows = comparison()->byDistance();
 
     expect($rows[0]['weight'])->toBe(20)
-        ->and($rows[0]['blade_attempts'])->toBe(100)
-        ->and($rows[0]['mallet_attempts'])->toBe(20);
+        ->and($rows[0]['first_attempts'])->toBe(100)
+        ->and($rows[0]['second_attempts'])->toBe(20);
 });
 
 it('refuses to recommend before either putter has enough putts', function () {
-    logMakeRate(60, 30, 10, Putter::Blade);
-    logMakeRate(40, 90, 10, Putter::Mallet);
+    logMakeRate(60, 30, 10, blade());
+    logMakeRate(40, 90, 10, mallet());
 
-    $verdict = app(PutterComparison::class)->verdict();
+    $verdict = comparison()->verdict();
 
     expect($verdict['state'])->toBe('insufficient_data')
         ->and($verdict['putter'])->toBeNull()
         ->and($verdict['needed'])->toBe(60)
-        ->and($verdict['message'])->toContain('mallet');
+        ->and($verdict['message'])->toContain('Mallet');
 });
 
 it('refuses to recommend when the two putters never share distances', function () {
-    logMakeRate(120, 40, 10, Putter::Blade);
-    logMakeRate(120, 80, 25, Putter::Mallet);
+    logMakeRate(120, 40, 10, blade());
+    logMakeRate(120, 80, 25, mallet());
 
-    $verdict = app(PutterComparison::class)->verdict();
+    $verdict = comparison()->verdict();
 
     expect($verdict['state'])->toBe('insufficient_data')
         ->and($verdict['message'])->toContain('overlap');
 });
 
 it('calls a small gap too close rather than recommending on noise', function () {
-    logMakeRate(200, 50, 10, Putter::Blade);
-    logMakeRate(200, 53, 10, Putter::Mallet);
+    logMakeRate(200, 50, 10, blade());
+    logMakeRate(200, 53, 10, mallet());
 
-    $verdict = app(PutterComparison::class)->verdict();
+    $verdict = comparison()->verdict();
 
     expect($verdict['state'])->toBe('too_close')
         ->and($verdict['putter'])->toBeNull()
@@ -69,124 +67,124 @@ it('calls a small gap too close rather than recommending on noise', function () 
 });
 
 it('recommends the putter that is clearly better at matched distances', function () {
-    logMakeRate(100, 30, 10, Putter::Blade);
-    logMakeRate(100, 70, 10, Putter::Mallet);
+    logMakeRate(100, 30, 10, blade());
+    logMakeRate(100, 70, 10, mallet());
 
-    $verdict = app(PutterComparison::class)->verdict();
+    $verdict = comparison()->verdict();
 
     expect($verdict['state'])->toBe('recommended')
-        ->and($verdict['putter'])->toBe(Putter::Mallet)
+        ->and($verdict['putter']->id)->toBe(mallet()->id)
         ->and($verdict['gap'])->toBe(40.0)
         ->and($verdict['sample'])->toBe(100)
-        ->and($verdict['message'])->toContain('Play the mallet');
+        ->and($verdict['message'])->toContain('Play Mallet');
 });
 
 it('does not let volume at unmatched distances swing the recommendation', function () {
     // Even scoring where they overlap.
-    logMakeRate(120, 50, 10, Putter::Blade);
-    logMakeRate(120, 50, 10, Putter::Mallet);
+    logMakeRate(120, 50, 10, blade());
+    logMakeRate(120, 50, 10, mallet());
 
     // A pile of tap-ins the mallet never took. Raw make rate would crown the blade.
-    logMakeRate(200, 100, 2, Putter::Blade);
+    logMakeRate(200, 100, 2, blade());
 
-    $comparison = app(PutterComparison::class);
+    $comparison = comparison();
 
-    expect($comparison->headline()[Putter::Blade->value]['make_percent'])->toBeGreaterThan(80.0)
+    expect($comparison->headline()[blade()->id]['make_percent'])->toBeGreaterThan(80.0)
         ->and($comparison->verdict()['state'])->toBe('too_close');
 });
 
 it('surfaces a short range edge as a strength', function () {
-    logMakeRate(100, 60, 5, Putter::Blade);
-    logMakeRate(100, 85, 5, Putter::Mallet);
+    logMakeRate(100, 60, 5, blade());
+    logMakeRate(100, 85, 5, mallet());
 
-    $strengths = app(PutterComparison::class)->strengths();
+    $strengths = comparison()->strengths();
 
-    expect($strengths[Putter::Mallet->value])->not->toBeEmpty()
-        ->and($strengths[Putter::Blade->value])->toBeEmpty();
+    expect($strengths[mallet()->id])->not->toBeEmpty()
+        ->and($strengths[blade()->id])->toBeEmpty();
 
-    $headlines = array_column($strengths[Putter::Mallet->value], 'headline');
+    $headlines = array_column($strengths[mallet()->id], 'headline');
 
     expect($headlines)->toContain('Short range');
 });
 
 it('credits the putter whose misses stay on line', function () {
-    logPutts(120, PuttResult::MissShort, 10, PuttContext::Inside, Putter::Mallet);
-    logPutts(120, PuttResult::MissLeft, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(120, PuttResult::MissShort, 10, PuttContext::Inside, mallet());
+    logPutts(120, PuttResult::MissLeft, 10, PuttContext::Inside, blade());
 
-    $strengths = app(PutterComparison::class)->strengths();
-    $headlines = array_column($strengths[Putter::Mallet->value], 'headline');
+    $strengths = comparison()->strengths();
+    $headlines = array_column($strengths[mallet()->id], 'headline');
 
     expect($headlines)->toContain('Holds the line');
 });
 
 it('reports the totals for each putter side by side', function () {
-    logMakeRate(100, 40, 10, Putter::Blade);
-    logMakeRate(50, 80, 10, Putter::Mallet, PuttContext::Outside);
+    logMakeRate(100, 40, 10, blade());
+    logMakeRate(50, 80, 10, mallet(), PuttContext::Outside);
 
-    $headline = app(PutterComparison::class)->headline();
+    $headline = comparison()->headline();
 
-    expect($headline[Putter::Blade->value]['attempts'])->toBe(100)
-        ->and($headline[Putter::Blade->value]['make_percent'])->toBe(40.0)
-        ->and($headline[Putter::Blade->value]['inside']['attempts'])->toBe(100)
-        ->and($headline[Putter::Blade->value]['outside']['attempts'])->toBe(0)
-        ->and($headline[Putter::Mallet->value]['attempts'])->toBe(50)
-        ->and($headline[Putter::Mallet->value]['outside']['make_percent'])->toBe(80.0);
+    expect($headline[blade()->id]['attempts'])->toBe(100)
+        ->and($headline[blade()->id]['make_percent'])->toBe(40.0)
+        ->and($headline[blade()->id]['inside']['attempts'])->toBe(100)
+        ->and($headline[blade()->id]['outside']['attempts'])->toBe(0)
+        ->and($headline[mallet()->id]['attempts'])->toBe(50)
+        ->and($headline[mallet()->id]['outside']['make_percent'])->toBe(80.0);
 });
 
 it('breaks each putter down by inside and outside', function () {
-    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
-    logMakeRate(40, 60, 10, Putter::Mallet, PuttContext::Inside);
-    logMakeRate(40, 55, 10, Putter::Mallet, PuttContext::Outside);
+    logMakeRate(40, 75, 10, blade(), PuttContext::Inside);
+    logMakeRate(40, 50, 10, blade(), PuttContext::Outside);
+    logMakeRate(40, 60, 10, mallet(), PuttContext::Inside);
+    logMakeRate(40, 55, 10, mallet(), PuttContext::Outside);
 
-    $breakdown = app(PutterComparison::class)->contextBreakdown();
+    $breakdown = comparison()->contextBreakdown();
 
-    expect($breakdown[Putter::Blade->value]['inside']['make_percent'])->toBe(75.0)
-        ->and($breakdown[Putter::Blade->value]['outside']['make_percent'])->toBe(50.0)
-        ->and($breakdown[Putter::Blade->value]['drop'])->toBe(25.0)
-        ->and($breakdown[Putter::Mallet->value]['drop'])->toBe(5.0)
-        ->and($breakdown[Putter::Mallet->value]['comparable'])->toBeTrue();
+    expect($breakdown[blade()->id]['inside']['make_percent'])->toBe(75.0)
+        ->and($breakdown[blade()->id]['outside']['make_percent'])->toBe(50.0)
+        ->and($breakdown[blade()->id]['drop'])->toBe(25.0)
+        ->and($breakdown[mallet()->id]['drop'])->toBe(5.0)
+        ->and($breakdown[mallet()->id]['comparable'])->toBeTrue();
 });
 
 it('marks a putter uncomparable until it has putts on both sides', function () {
-    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 75, 10, blade(), PuttContext::Inside);
 
-    $breakdown = app(PutterComparison::class)->contextBreakdown();
+    $breakdown = comparison()->contextBreakdown();
 
-    expect($breakdown[Putter::Blade->value]['comparable'])->toBeFalse()
-        ->and($breakdown[Putter::Blade->value]['outside']['attempts'])->toBe(0);
+    expect($breakdown[blade()->id]['comparable'])->toBeFalse()
+        ->and($breakdown[blade()->id]['outside']['attempts'])->toBe(0);
 });
 
 it('keeps the context breakdown whole even when the comparison is filtered', function () {
-    logMakeRate(40, 75, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 75, 10, blade(), PuttContext::Inside);
+    logMakeRate(40, 50, 10, blade(), PuttContext::Outside);
 
-    $breakdown = app(PutterComparison::class)
+    $breakdown = comparison()
         ->inContext(PuttContext::Outside)
         ->contextBreakdown();
 
-    expect($breakdown[Putter::Blade->value]['inside']['attempts'])->toBe(40)
-        ->and($breakdown[Putter::Blade->value]['drop'])->toBe(25.0);
+    expect($breakdown[blade()->id]['inside']['attempts'])->toBe(40)
+        ->and($breakdown[blade()->id]['drop'])->toBe(25.0);
 });
 
 it('recommends a putter for outside putting on its own merits', function () {
     // The blade is better on the carpet, the mallet on real greens.
-    logMakeRate(120, 80, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(120, 40, 10, Putter::Blade, PuttContext::Outside);
-    logMakeRate(120, 50, 10, Putter::Mallet, PuttContext::Inside);
-    logMakeRate(120, 70, 10, Putter::Mallet, PuttContext::Outside);
+    logMakeRate(120, 80, 10, blade(), PuttContext::Inside);
+    logMakeRate(120, 40, 10, blade(), PuttContext::Outside);
+    logMakeRate(120, 50, 10, mallet(), PuttContext::Inside);
+    logMakeRate(120, 70, 10, mallet(), PuttContext::Outside);
 
-    $comparison = app(PutterComparison::class);
+    $comparison = comparison();
 
-    expect($comparison->inContext(PuttContext::Outside)->verdict()['putter'])->toBe(Putter::Mallet)
-        ->and($comparison->inContext(PuttContext::Inside)->verdict()['putter'])->toBe(Putter::Blade);
+    expect($comparison->inContext(PuttContext::Outside)->verdict()['putter']->id)->toBe(mallet()->id)
+        ->and($comparison->inContext(PuttContext::Inside)->verdict()['putter']->id)->toBe(blade()->id);
 });
 
 it('counts only the scoped context in the filtered headline', function () {
-    logMakeRate(60, 50, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(40, 50, 10, Putter::Blade, PuttContext::Outside);
+    logMakeRate(60, 50, 10, blade(), PuttContext::Inside);
+    logMakeRate(40, 50, 10, blade(), PuttContext::Outside);
 
-    $headline = app(PutterComparison::class)->inContext(PuttContext::Outside)->headline();
+    $headline = comparison()->inContext(PuttContext::Outside)->headline();
 
-    expect($headline[Putter::Blade->value]['attempts'])->toBe(40);
+    expect($headline[blade()->id]['attempts'])->toBe(40);
 });

@@ -1,7 +1,5 @@
 @php
-    use App\Enums\Putter;
-
-    /** @var array<string, array<string, mixed>> $contextBreakdown */
+    /** @var array<int, array<string, mixed>> $contextBreakdown keyed by putter id */
     $anyData = collect($contextBreakdown)
         ->contains(fn (array $row): bool => $row['inside']['attempts'] > 0 || $row['outside']['attempts'] > 0);
 @endphp
@@ -9,7 +7,7 @@
 @if ($anyData)
     <section class="mt-6">
         <h2 class="text-sm font-medium text-slate-300">Carpet vs. real greens</h2>
-        <p class="mt-1 text-[11px] text-slate-500">What each putter gives up when you leave the carpet. Always spans both putters and both contexts, whatever the filters above say.</p>
+        <p class="mt-1 text-[11px] text-slate-500">What each putter gives up when you leave the carpet. Always spans both contexts, whatever the filters above say.</p>
 
         <div class="mt-2 overflow-hidden rounded-lg bg-slate-900">
             <div class="grid grid-cols-4 border-b border-slate-800 px-3 py-2 text-[11px] text-slate-500">
@@ -19,10 +17,9 @@
                 <span class="text-right">Drop</span>
             </div>
 
-            @foreach (Putter::cases() as $option)
-                @php $row = $contextBreakdown[$option->value]; @endphp
+            @foreach ($contextBreakdown as $row)
                 <div class="grid grid-cols-4 items-baseline px-3 py-2.5 {{ ! $loop->last ? 'border-b border-slate-800/60' : '' }}">
-                    <span class="text-xs font-medium text-slate-200">{{ $option->label() }}</span>
+                    <span class="truncate text-xs font-medium text-slate-200">{{ $row['putter']->name }}</span>
 
                     @foreach (['inside', 'outside'] as $side)
                         <span class="text-right text-sm {{ $row[$side]['attempts'] > 0 ? 'text-slate-300' : 'text-slate-700' }}">
@@ -54,9 +51,9 @@
             $steadiest = $comparable->sortBy('drop')->first();
         @endphp
 
-        @if ($comparable->count() === 2)
+        @if ($comparable->count() >= 2)
             <p class="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                The {{ strtolower($steadiest['putter']->label()) }} travels best:
+                {{ $steadiest['putter']->name }} travels best:
                 @if ($steadiest['drop'] > 0)
                     it gives up only {{ $steadiest['drop'] }} points outside.
                 @else

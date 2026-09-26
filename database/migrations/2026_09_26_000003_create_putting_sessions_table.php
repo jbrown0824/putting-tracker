@@ -10,13 +10,17 @@ return new class extends Migration
     {
         Schema::create('putting_sessions', function (Blueprint $table) {
             $table->id();
-            $table->string('context')->index();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('putter_id')->constrained()->cascadeOnDelete();
+            $table->string('context');
+            $table->string('surface_type')->nullable();
             $table->string('location')->nullable();
-            $table->string('surface')->nullable();
             $table->text('notes')->nullable();
-            $table->timestamp('started_at')->index();
+            $table->timestamp('started_at');
             $table->timestamp('ended_at')->nullable();
             $table->timestamps();
+
+            $table->index(['user_id', 'started_at']);
         });
     }
 

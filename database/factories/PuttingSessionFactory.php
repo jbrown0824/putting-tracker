@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\PuttContext;
-use App\Enums\Putter;
+use App\Models\Putter;
 use App\Models\PuttingSession;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Carbon;
@@ -14,10 +14,12 @@ class PuttingSessionFactory extends Factory
     public function definition(): array
     {
         return [
+            'putter_id' => Putter::factory(),
+            // Always the putter's owner, so a session can never straddle two players.
+            'user_id' => fn (array $attributes): int => Putter::query()->findOrFail($attributes['putter_id'])->user_id,
             'context' => PuttContext::Inside,
-            'putter' => Putter::Blade,
+            'surface_type' => null,
             'location' => null,
-            'surface' => null,
             'notes' => null,
             'started_at' => Carbon::now(),
             'ended_at' => null,
@@ -27,10 +29,5 @@ class PuttingSessionFactory extends Factory
     public function outside(): static
     {
         return $this->state(fn () => ['context' => PuttContext::Outside]);
-    }
-
-    public function mallet(): static
-    {
-        return $this->state(fn () => ['putter' => Putter::Mallet]);
     }
 }

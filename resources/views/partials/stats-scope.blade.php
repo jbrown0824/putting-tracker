@@ -8,7 +8,7 @@
 
         @foreach ($sessions as $option)
             <option value="{{ route('stats', ['session' => $option->id]) }}" @selected($session?->id === $option->id)>
-                {{ $option->started_at->format('M j, g:ia') }} · {{ $option->context->label() }} · {{ $option->putter->label() }} · {{ $option->putts_count }} putts
+                {{ $option->started_at->tz(auth()->user()->timezone)->format('M j, g:ia') }} · {{ $option->whereLabel() }} · {{ $option->putter->name }} · {{ $option->putts_count }} putts
             </option>
         @endforeach
     </select>

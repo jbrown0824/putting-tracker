@@ -1,10 +1,8 @@
 <?php
 
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Services\PuttingProfile;
-use App\Services\PuttStats;
 
 function axis(array $axes, string $key): array
 {
@@ -14,20 +12,20 @@ function axis(array $axes, string $key): array
 it('scores an axis at the baseline when you match the reference curve', function () {
     $profile = app(PuttingProfile::class);
 
-    logMakeRate(300, $profile->referenceMakeRate(4), 4, Putter::Blade);
+    logMakeRate(300, $profile->referenceMakeRate(4), 4, blade());
 
-    expect(axis($profile->build(app(PuttStats::class)), 'short')['score'])
+    expect(axis($profile->build(stats()), 'short')['score'])
         ->toBe(PuttingProfile::BASELINE_SCORE);
 });
 
 it('scores full marks at double the reference curve', function () {
     $profile = app(PuttingProfile::class);
 
-    logMakeRate(300, $profile->referenceMakeRate(10), 10, Putter::Blade);
-    logMakeRate(300, $profile->referenceMakeRate(10) * 2, 10, Putter::Mallet);
+    logMakeRate(300, $profile->referenceMakeRate(10), 10, blade());
+    logMakeRate(300, $profile->referenceMakeRate(10) * 2, 10, mallet());
 
-    $weak = $profile->build(app(PuttStats::class)->forPutter(Putter::Blade));
-    $strong = $profile->build(app(PuttStats::class)->forPutter(Putter::Mallet));
+    $weak = $profile->build(stats()->forPutter(blade()));
+    $strong = $profile->build(stats()->forPutter(mallet()));
 
     expect(axis($weak, 'mid')['score'])->toBe(PuttingProfile::BASELINE_SCORE)
         ->and(axis($strong, 'mid')['score'])->toBe(100);
@@ -47,11 +45,11 @@ it('does not let the distance mix inside a band drive the score', function () {
     $profile = app(PuttingProfile::class);
 
     // Both play the reference exactly, but one lags from 15ft and the other from 30.
-    logMakeRate(300, $profile->referenceMakeRate(15), 15, Putter::Blade);
-    logMakeRate(300, $profile->referenceMakeRate(30), 30, Putter::Mallet);
+    logMakeRate(300, $profile->referenceMakeRate(15), 15, blade());
+    logMakeRate(300, $profile->referenceMakeRate(30), 30, mallet());
 
-    $near = axis($profile->build(app(PuttStats::class)->forPutter(Putter::Blade)), 'lag');
-    $far = axis($profile->build(app(PuttStats::class)->forPutter(Putter::Mallet)), 'lag');
+    $near = axis($profile->build(stats()->forPutter(blade())), 'lag');
+    $far = axis($profile->build(stats()->forPutter(mallet())), 'lag');
 
     // Pooled make rates differ hugely; the scores should barely move.
     expect($near['value'])->toBeGreaterThan($far['value'] + 10)
@@ -59,10 +57,10 @@ it('does not let the distance mix inside a band drive the score', function () {
 });
 
 it('leaves an axis unscored until it has enough attempts', function () {
-    logMakeRate(60, 50, 10, Putter::Blade);
-    logMakeRate(4, 50, 3, Putter::Blade);
+    logMakeRate(60, 50, 10, blade());
+    logMakeRate(4, 50, 3, blade());
 
-    $axes = app(PuttingProfile::class)->build(app(PuttStats::class));
+    $axes = app(PuttingProfile::class)->build(stats());
 
     expect(axis($axes, 'short')['score'])->toBeNull()
         ->and(axis($axes, 'short')['attempts'])->toBe(4)
@@ -73,10 +71,10 @@ it('scores the error axes upside down, so fewer misses is better', function () {
     logPutts(70, PuttResult::Sunk, 10);
     logPutts(30, PuttResult::MissShort, 10);
 
-    $speedHeavy = app(PuttingProfile::class)->build(app(PuttStats::class));
+    $speedHeavy = app(PuttingProfile::class)->build(stats());
 
-    logPutts(200, PuttResult::MissLeft, 10, PuttContext::Inside, Putter::Mallet);
-    $lineHeavy = app(PuttingProfile::class)->build(app(PuttStats::class)->forPutter(Putter::Mallet));
+    logPutts(200, PuttResult::MissLeft, 10, PuttContext::Inside, mallet());
+    $lineHeavy = app(PuttingProfile::class)->build(stats()->forPutter(mallet()));
 
     expect(axis($speedHeavy, 'speed')['score'])->toBe(PuttingProfile::BASELINE_SCORE)
         ->and(axis($speedHeavy, 'line')['score'])->toBe(100)
@@ -84,23 +82,23 @@ it('scores the error axes upside down, so fewer misses is better', function () {
 });
 
 it('separates a speed problem from a line problem in the shape', function () {
-    logPutts(50, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Blade);
-    logPutts(50, PuttResult::MissShort, 10, PuttContext::Inside, Putter::Blade);
+    logPutts(50, PuttResult::Sunk, 10, PuttContext::Inside, blade());
+    logPutts(50, PuttResult::MissShort, 10, PuttContext::Inside, blade());
 
-    logPutts(50, PuttResult::Sunk, 10, PuttContext::Inside, Putter::Mallet);
-    logPutts(50, PuttResult::MissLeft, 10, PuttContext::Inside, Putter::Mallet);
+    logPutts(50, PuttResult::Sunk, 10, PuttContext::Inside, mallet());
+    logPutts(50, PuttResult::MissLeft, 10, PuttContext::Inside, mallet());
 
-    $blade = app(PuttingProfile::class)->build(app(PuttStats::class)->forPutter(Putter::Blade));
-    $mallet = app(PuttingProfile::class)->build(app(PuttStats::class)->forPutter(Putter::Mallet));
+    $blade = app(PuttingProfile::class)->build(stats()->forPutter(blade()));
+    $mallet = app(PuttingProfile::class)->build(stats()->forPutter(mallet()));
 
     expect(axis($blade, 'speed')['score'])->toBeLessThan(axis($blade, 'line')['score'])
         ->and(axis($mallet, 'line')['score'])->toBeLessThan(axis($mallet, 'speed')['score']);
 });
 
 it('builds five axes in a stable order', function () {
-    logMakeRate(60, 50, 10, Putter::Blade);
+    logMakeRate(60, 50, 10, blade());
 
-    $axes = app(PuttingProfile::class)->build(app(PuttStats::class));
+    $axes = app(PuttingProfile::class)->build(stats());
 
     expect(array_column($axes, 'key'))->toBe(['short', 'mid', 'lag', 'speed', 'line']);
 });
@@ -108,12 +106,12 @@ it('builds five axes in a stable order', function () {
 it('needs three scored axes before the chart is worth drawing', function () {
     $profile = app(PuttingProfile::class);
 
-    logMakeRate(4, 50, 3, Putter::Blade);
-    expect($profile->isReadable($profile->build(app(PuttStats::class))))->toBeFalse();
+    logMakeRate(4, 50, 3, blade());
+    expect($profile->isReadable($profile->build(stats())))->toBeFalse();
 
-    logMakeRate(40, 50, 10, Putter::Blade);
-    logMakeRate(40, 50, 20, Putter::Blade);
-    expect($profile->isReadable($profile->build(app(PuttStats::class))))->toBeTrue();
+    logMakeRate(40, 50, 10, blade());
+    logMakeRate(40, 50, 20, blade());
+    expect($profile->isReadable($profile->build(stats())))->toBeTrue();
 });
 
 it('names the strongest and weakest axis', function () {
@@ -129,21 +127,21 @@ it('names the strongest and weakest axis', function () {
     logPutts(57, PuttResult::MissShort, 20);
 
     $profile = app(PuttingProfile::class);
-    $extremes = $profile->extremes($profile->build(app(PuttStats::class)));
+    $extremes = $profile->extremes($profile->build(stats()));
 
     expect($extremes['best']['key'])->toBe('short')
         ->and($extremes['worst']['key'])->toBe('lag');
 });
 
 it('respects the putter and context scopes it is handed', function () {
-    logMakeRate(60, 90, 4, Putter::Blade, PuttContext::Inside);
-    logMakeRate(60, 20, 4, Putter::Blade, PuttContext::Outside);
+    logMakeRate(60, 90, 4, blade(), PuttContext::Inside);
+    logMakeRate(60, 20, 4, blade(), PuttContext::Outside);
 
     $inside = app(PuttingProfile::class)->build(
-        app(PuttStats::class)->forPutter(Putter::Blade)->inContext(PuttContext::Inside),
+        stats()->forPutter(blade())->inContext(PuttContext::Inside),
     );
     $outside = app(PuttingProfile::class)->build(
-        app(PuttStats::class)->forPutter(Putter::Blade)->inContext(PuttContext::Outside),
+        stats()->forPutter(blade())->inContext(PuttContext::Outside),
     );
 
     expect(axis($inside, 'short')['score'])->toBeGreaterThan(axis($outside, 'short')['score'])

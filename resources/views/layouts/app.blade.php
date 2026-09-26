@@ -13,27 +13,30 @@
     <title>@yield('title', 'Putting Tracker')</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="h-full bg-slate-950 text-slate-100 antialiased select-none">
+<body @auth data-user="{{ auth()->id() }}" @endauth class="h-full bg-slate-950 text-slate-100 antialiased select-none">
     <div class="mx-auto flex min-h-full w-full max-w-md flex-col">
         <main class="flex-1 px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
             @yield('content')
         </main>
 
-        <nav class="sticky bottom-0 mt-4 grid grid-cols-3 border-t border-slate-800 bg-slate-950/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
+        @auth
+        <nav class="sticky bottom-0 mt-4 grid grid-cols-4 border-t border-slate-800 bg-slate-950/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
             @php
                 $tabs = [
                     ['route' => 'log', 'label' => 'Log'],
-                    ['route' => 'stats', 'label' => 'Stats'],
+                    ['route' => 'stats', 'label' => 'Stats', 'also' => ['stats.*']],
                     ['route' => 'sessions.index', 'label' => 'History'],
+                    ['route' => 'settings', 'label' => 'Settings', 'also' => ['putters.*']],
                 ];
             @endphp
             @foreach ($tabs as $tab)
                 <a href="{{ route($tab['route']) }}"
-                   class="py-2 text-center text-sm font-medium {{ request()->routeIs($tab['route']) ? 'text-emerald-400' : 'text-slate-500' }}">
+                   class="py-2 text-center text-sm font-medium {{ request()->routeIs($tab['route'], ...($tab['also'] ?? [])) ? 'text-emerald-400' : 'text-slate-500' }}">
                     {{ $tab['label'] }}
                 </a>
             @endforeach
         </nav>
+        @endauth
     </div>
 </body>
 </html>

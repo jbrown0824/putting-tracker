@@ -14,12 +14,12 @@
            class="mt-2 flex items-center justify-between rounded-lg bg-slate-900 px-3 py-3">
             <div>
                 <div class="text-sm">
-                    {{ $session->started_at->format('M j, g:ia') }}
+                    {{ $session->started_at->tz(auth()->user()->timezone)->format('M j, g:ia') }}
                     <span class="ml-1 rounded px-1.5 py-0.5 text-[10px] {{ $session->context->value === 'outside' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-300' }}">
-                        {{ $session->context->label() }}
+                        {{ $session->surface_type?->label() ?? $session->context->label() }}
                     </span>
                     <span class="ml-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-300">
-                        {{ $session->putter->label() }}
+                        {{ $session->putter->name }}
                     </span>
                 </div>
                 <div class="mt-0.5 text-[11px] text-slate-500">

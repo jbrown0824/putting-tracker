@@ -6,15 +6,14 @@ use App\Enums\BreakSide;
 use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
-use App\Models\Challenge;
 use App\Models\Putt;
+use App\Models\Putter;
 use App\Models\PuttingSession;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class PuttStats
@@ -29,6 +28,8 @@ class PuttStats
      */
     private const MIN_POSITION_GAP = 8.0;
 
+    private ?int $userId = null;
+
     private ?Putter $putter = null;
 
     private ?PuttContext $context = null;
@@ -40,8 +41,20 @@ class PuttStats
     private ?PuttSlope $slope = null;
 
     /**
+     * A copy of this service that sees one player's putts. Every query needs one:
+     * an unscoped copy refuses to run rather than pool everybody's practice.
+     */
+    public function forUser(User $user): self
+    {
+        $clone = clone $this;
+        $clone->userId = $user->id;
+
+        return $clone;
+    }
+
+    /**
      * A copy of this service that only ever sees one putter's putts. Passing null
-     * returns an unscoped copy that pools both.
+     * returns an unscoped copy that pools every putter.
      */
     public function forPutter(?Putter $putter): self
     {
@@ -116,43 +129,6 @@ class PuttStats
     public function context(): ?PuttContext
     {
         return $this->context;
-    }
-
-    /**
-     * Progress against the challenge targets, plus the pace needed to finish on time.
-     *
-     * Deliberately unscoped: the challenge is a volume goal, so every putt counts
-     * towards it no matter which putter hit it. Calling this on a scoped copy still
-     * returns combined figures.
-     *
-     * @return array<string, int|float>
-     */
-    public function progress(Challenge $challenge): array
-    {
-        $totals = $this->conditionalCounts(Putt::query());
-
-        $total = (int) $totals['attempts'];
-        $outside = (int) $totals['outside'];
-        $daysRemaining = $challenge->daysRemaining();
-
-        $remaining = max(0, $challenge->target_total - $total);
-        $outsideRemaining = max(0, $challenge->target_outside_min - $outside);
-
-        return [
-            'total' => $total,
-            'inside' => $total - $outside,
-            'outside' => $outside,
-            'sunk' => (int) $totals['sunk'],
-            'make_percent' => $this->percent((int) $totals['sunk'], $total),
-            'target_total' => $challenge->target_total,
-            'target_outside_min' => $challenge->target_outside_min,
-            'remaining' => $remaining,
-            'outside_remaining' => $outsideRemaining,
-            'days_remaining' => $daysRemaining,
-            'per_day_needed' => $daysRemaining > 0 ? (int) ceil($remaining / $daysRemaining) : $remaining,
-            'outside_per_day_needed' => $daysRemaining > 0 ? (int) ceil($outsideRemaining / $daysRemaining) : $outsideRemaining,
-            'percent_complete' => $this->percent($total, $challenge->target_total),
-        ];
     }
 
     /**
@@ -279,7 +255,7 @@ class PuttStats
      *
      * Grouped by exact distance rather than by band, so the caller decides how
      * coarsely to bucket without needing a second query. Grouping happens in PHP
-     * downstream for the same portability reason as dailyVolume().
+     * downstream so the query stays portable between SQLite and Postgres.
      *
      * @return Collection<int, array<string, mixed>>
      */
@@ -474,53 +450,6 @@ class PuttStats
         }
 
         return null;
-    }
-
-    /**
-     * Daily volume against the flat pace line the challenge requires.
-     *
-     * Unscoped for the same reason as progress(): the pace line tracks the challenge,
-     * which counts every putt regardless of putter.
-     *
-     * Grouped in PHP rather than SQL so the query stays portable between
-     * SQLite locally and Postgres in production.
-     *
-     * @return Collection<int, array<string, mixed>>
-     */
-    public function dailyVolume(Challenge $challenge): Collection
-    {
-        $perDay = Putt::query()
-            ->selectRaw('hit_at, context')
-            ->get()
-            ->groupBy(fn (Putt $putt): string => $putt->hit_at->toDateString());
-
-        $requiredPerDay = $challenge->target_total / max(1, $challenge->totalDays());
-        $cumulative = 0;
-        $days = collect();
-        $cursor = $challenge->start_date->copy();
-        $today = Carbon::today();
-        $dayNumber = 0;
-
-        while ($cursor->lessThanOrEqualTo($challenge->end_date)) {
-            $key = $cursor->toDateString();
-            $dayNumber++;
-            $putts = $perDay->get($key);
-            $count = $putts?->count() ?? 0;
-            $cumulative += $count;
-
-            $days->push([
-                'date' => $key,
-                'label' => $cursor->format('M j'),
-                'count' => $count,
-                'outside' => $putts?->where('context', PuttContext::Outside)->count() ?? 0,
-                'cumulative' => $cursor->greaterThan($today) ? null : $cumulative,
-                'target_cumulative' => (int) round($requiredPerDay * $dayNumber),
-            ]);
-
-            $cursor->addDay();
-        }
-
-        return $days;
     }
 
     /**
@@ -724,13 +653,13 @@ class PuttStats
     }
 
     /**
-     * How the current scope reads in a sentence: "with the mallet outside",
-     * "outside", "with the blade", or an empty string when nothing is scoped.
+     * How the current scope reads in a sentence: "with Spider X outside",
+     * "outside", "with Spider X", or an empty string when nothing is scoped.
      */
     private function scopeSuffix(): string
     {
         $parts = array_filter([
-            $this->putter !== null ? sprintf('with the %s', strtolower($this->putter->label())) : null,
+            $this->putter !== null ? sprintf('with %s', $this->putter->name) : null,
             $this->context !== null ? strtolower($this->context->label()) : null,
         ]);
 
@@ -739,40 +668,23 @@ class PuttStats
 
     /**
      * Every performance query starts here, so a scoped copy can never leak another
-     * putter's or another session's putts into a stat.
+     * player's, putter's or session's putts into a stat.
      *
      * @return Builder<Putt>
      */
     private function baseQuery(): Builder
     {
+        if ($this->userId === null) {
+            throw new \LogicException('PuttStats must be scoped with forUser() before it can query.');
+        }
+
         return Putt::query()
-            ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter', $putter))
+            ->where('user_id', $this->userId)
+            ->when($this->putter, fn (Builder $query, Putter $putter): Builder => $query->where('putter_id', $putter->id))
             ->when($this->context, fn (Builder $query, PuttContext $context): Builder => $query->where('context', $context))
             ->when($this->sessionId, fn (Builder $query, int $id): Builder => $query->where('putting_session_id', $id))
             ->when($this->position, fn (Builder $query, ClockPosition $position): Builder => $query->where('clock_position', $position))
             ->when($this->slope, fn (Builder $query, PuttSlope $slope): Builder => $query->where('slope', $slope));
-    }
-
-    /**
-     * @param  Builder<Putt>  $query
-     * @return array<string, int>
-     */
-    private function conditionalCounts(Builder $query): array
-    {
-        $row = $query
-            ->selectRaw('count(*) as attempts')
-            ->selectRaw($this->countCase(PuttResult::Sunk, 'sunk'))
-            ->selectRaw(sprintf(
-                'sum(case when context = %s then 1 else 0 end) as outside',
-                $this->quote(PuttContext::Outside->value),
-            ))
-            ->first();
-
-        return [
-            'attempts' => (int) $row->attempts,
-            'sunk' => (int) $row->sunk,
-            'outside' => (int) $row->outside,
-        ];
     }
 
     private function countCase(PuttResult $result, string $alias): string

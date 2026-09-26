@@ -4,9 +4,11 @@
 
     /**
      * Carry the putter across so switching context does not silently reset it.
-     * The compare view spans both putters and never defines one.
+     * The compare view carries its chosen pair instead.
      */
-    $carry = array_filter(['putter' => ($putter ?? null)?->value]);
+    $carry = request()->routeIs('stats.compare')
+        ? array_filter(request()->only(['first', 'second']))
+        : array_filter(['putter' => ($putter ?? null)?->id]);
 @endphp
 
 <div class="mt-1.5 grid grid-cols-3 gap-1.5">

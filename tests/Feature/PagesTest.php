@@ -3,15 +3,15 @@
 use App\Enums\ClockPosition;
 use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
-use App\Enums\Putter;
+use App\Enums\PutterHeadType;
 use App\Enums\PuttResult;
-use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\PuttingSession;
+use App\Models\User;
+
+beforeEach(fn () => $this->actingAs(testUser()));
 
 it('renders the log screen with the dial', function () {
-    Challenge::factory()->create();
-
     $this->get(route('log'))
         ->assertOk()
         ->assertSee('SUNK')
@@ -22,13 +22,20 @@ it('renders the log screen with the dial', function () {
         ->assertSee('Outside');
 });
 
-it('renders the log screen when no challenge exists', function () {
-    $this->get(route('log'))->assertOk()->assertSee('No challenge configured');
+it('offers the player\'s own putters on the log screen', function () {
+    blade();
+    mallet();
+    blade(User::factory()->create())->update(['name' => 'Someone else\'s']);
+
+    $this->get(route('log'))
+        ->assertOk()
+        ->assertSee('Blade')
+        ->assertSee('Mallet')
+        ->assertDontSee('Someone else');
 });
 
 it('renders the stats page with data', function () {
-    Challenge::factory()->create();
-    $session = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
     Putt::factory()->count(30)->create([
         'putting_session_id' => $session->id,
         'result' => PuttResult::MissShort,
@@ -44,13 +51,12 @@ it('renders the stats page with data', function () {
 });
 
 it('renders the stats page with no putts', function () {
-    Challenge::factory()->create();
 
-    $this->get(route('stats'))->assertOk()->assertSee('No putts logged with the blade yet');
+    $this->get(route('stats'))->assertOk()->assertSee('No putts logged yet');
 });
 
 it('lists sessions with make rates', function () {
-    $session = PuttingSession::factory()->create(['context' => PuttContext::Outside]);
+    $session = PuttingSession::factory()->for(blade())->create(['context' => PuttContext::Outside]);
     Putt::factory()->count(4)->create([
         'putting_session_id' => $session->id,
         'result' => PuttResult::Sunk,
@@ -64,7 +70,7 @@ it('lists sessions with make rates', function () {
 });
 
 it('shows a session and deletes a putt from it', function () {
-    $session = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
     $putt = Putt::factory()->create(['putting_session_id' => $session->id]);
 
     $this->get(route('sessions.show', $session))->assertOk();
@@ -76,8 +82,8 @@ it('shows a session and deletes a putt from it', function () {
 });
 
 it('refuses to delete a putt through the wrong session', function () {
-    $session = PuttingSession::factory()->create();
-    $other = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
+    $other = PuttingSession::factory()->for(blade())->create();
     $putt = Putt::factory()->create(['putting_session_id' => $other->id]);
 
     $this->delete(route('sessions.putts.destroy', [$session, $putt]))->assertNotFound();
@@ -86,7 +92,7 @@ it('refuses to delete a putt through the wrong session', function () {
 });
 
 it('deletes a session and its putts', function () {
-    $session = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
     Putt::factory()->count(3)->create(['putting_session_id' => $session->id]);
 
     $this->delete(route('sessions.destroy', $session))->assertRedirect(route('sessions.index'));
@@ -96,7 +102,8 @@ it('deletes a session and its putts', function () {
 });
 
 it('shows a putter toggle on the stats page', function () {
-    Challenge::factory()->create();
+    blade();
+    mallet();
 
     $this->get(route('stats'))
         ->assertOk()
@@ -106,34 +113,32 @@ it('shows a putter toggle on the stats page', function () {
 });
 
 it('scopes the stats page to the requested putter', function () {
-    Challenge::factory()->create();
 
-    logMakeRate(40, 100, 12, Putter::Blade);
+    logMakeRate(40, 100, 12, blade());
 
-    $this->get(route('stats', ['putter' => 'mallet']))
+    $this->get(route('stats', ['putter' => mallet()->id]))
         ->assertOk()
-        ->assertSee('No putts logged with the mallet yet')
+        ->assertSee('No putts logged with Mallet yet')
         ->assertDontSee('Make rate by distance');
 
-    $this->get(route('stats', ['putter' => 'blade']))
+    $this->get(route('stats', ['putter' => blade()->id]))
         ->assertOk()
         ->assertSee('Make rate by distance')
-        ->assertDontSee('No putts logged with the blade yet');
+        ->assertDontSee('No putts logged with Blade yet');
 });
 
 it('remembers the last putter viewed', function () {
-    Challenge::factory()->create();
 
-    $this->get(route('stats', ['putter' => 'mallet']))->assertOk();
+    $this->get(route('stats', ['putter' => mallet()->id]))->assertOk();
 
     $this->get(route('stats'))
         ->assertOk()
-        ->assertSee('Everything below is Mallet only');
+        ->assertSee('Showing Mallet.');
 });
 
 it('asks for more data on the compare page before recommending', function () {
-    logMakeRate(20, 50, 10, Putter::Blade);
-    logMakeRate(20, 90, 10, Putter::Mallet);
+    logMakeRate(20, 50, 10, blade());
+    logMakeRate(20, 90, 10, mallet());
 
     $this->get(route('stats.compare'))
         ->assertOk()
@@ -142,34 +147,33 @@ it('asks for more data on the compare page before recommending', function () {
 });
 
 it('recommends a putter on the compare page once the data supports it', function () {
-    logMakeRate(120, 30, 10, Putter::Blade);
-    logMakeRate(120, 70, 10, Putter::Mallet);
+    logMakeRate(120, 30, 10, blade());
+    logMakeRate(120, 70, 10, mallet());
 
     $this->get(route('stats.compare'))
         ->assertOk()
         ->assertSee('Recommended')
-        ->assertSee('Play the mallet')
+        ->assertSee('Play Mallet')
         ->assertSee('Head to head')
         ->assertSee('Matched distances');
 });
 
 it('shows the putter on each history row', function () {
-    PuttingSession::factory()->mallet()->create();
+    PuttingSession::factory()->for(mallet())->create();
 
     $this->get(route('sessions.index'))->assertOk()->assertSee('Mallet');
 });
 
 it('scopes the stats page to a single session', function () {
-    Challenge::factory()->create();
 
-    $tonight = PuttingSession::factory()->create(['started_at' => now()]);
+    $tonight = PuttingSession::factory()->for(blade())->create(['started_at' => now()]);
     Putt::factory()->count(12)->create([
         'putting_session_id' => $tonight->id,
         'result' => PuttResult::Sunk,
         'distance_ft' => 10,
     ]);
 
-    $earlier = PuttingSession::factory()->create(['started_at' => now()->subDays(3)]);
+    $earlier = PuttingSession::factory()->for(blade())->create(['started_at' => now()->subDays(3)]);
     Putt::factory()->count(40)->create([
         'putting_session_id' => $earlier->id,
         'result' => PuttResult::MissShort,
@@ -186,12 +190,11 @@ it('scopes the stats page to a single session', function () {
 });
 
 it('offers every session with putts in the scope picker', function () {
-    Challenge::factory()->create();
 
-    $withPutts = PuttingSession::factory()->create();
+    $withPutts = PuttingSession::factory()->for(blade())->create();
     Putt::factory()->create(['putting_session_id' => $withPutts->id]);
 
-    PuttingSession::factory()->create();
+    PuttingSession::factory()->for(blade())->create();
 
     $response = $this->get(route('stats'))->assertOk()->assertSee('Overall');
 
@@ -199,15 +202,14 @@ it('offers every session with putts in the scope picker', function () {
 });
 
 it('falls back to overall when the session does not exist', function () {
-    Challenge::factory()->create();
 
     $this->get(route('stats', ['session' => 99999]))
         ->assertOk()
-        ->assertSee('days left');
+        ->assertSee('Showing all putters');
 });
 
 it('links to session stats from the session detail page', function () {
-    $session = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
 
     $this->get(route('sessions.show', $session))
         ->assertOk()
@@ -215,39 +217,36 @@ it('links to session stats from the session detail page', function () {
 });
 
 it('filters the stats page to a context', function () {
-    Challenge::factory()->create();
 
-    logMakeRate(40, 100, 12, Putter::Blade, PuttContext::Inside);
+    logMakeRate(40, 100, 12, blade(), PuttContext::Inside);
 
-    $this->get(route('stats', ['putter' => 'blade', 'context' => 'outside']))
+    $this->get(route('stats', ['putter' => blade()->id, 'context' => 'outside']))
         ->assertOk()
-        ->assertSee('No outside putts logged with the blade yet');
+        ->assertSee('No outside putts logged with Blade yet');
 
-    $this->get(route('stats', ['putter' => 'blade', 'context' => 'inside']))
+    $this->get(route('stats', ['putter' => blade()->id, 'context' => 'inside']))
         ->assertOk()
         ->assertSee('Make rate by distance')
-        ->assertSee('Everything below is Blade, inside only');
+        ->assertSee('Showing Blade, inside only');
 });
 
 it('remembers the last context viewed', function () {
-    Challenge::factory()->create();
-    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 50, 12, blade(), PuttContext::Outside);
 
     $this->get(route('stats', ['context' => 'outside']))->assertOk();
 
     $this->get(route('stats'))
         ->assertOk()
-        ->assertSee('Everything below is Blade, outside only');
+        ->assertSee('Showing all putters, outside only');
 });
 
 it('clears the context filter by following the Both link', function () {
-    Challenge::factory()->create();
-    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Inside);
-    logMakeRate(40, 90, 12, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 50, 12, blade(), PuttContext::Inside);
+    logMakeRate(40, 90, 12, blade(), PuttContext::Outside);
 
     $filtered = $this->get(route('stats', ['context' => 'outside']))
         ->assertOk()
-        ->assertSee('Everything below is Blade, outside only');
+        ->assertSee('Showing all putters, outside only');
 
     // Follow the link the page actually renders rather than building the URL by
     // hand. The filter is sticky, so a Both link that merely omitted the parameter
@@ -256,13 +255,12 @@ it('clears the context filter by following the Both link', function () {
 
     $this->get(html_entity_decode($matches[1]))
         ->assertOk()
-        ->assertSee('Everything below is Blade only')
+        ->assertSee('Showing all putters.')
         ->assertDontSee('outside only');
 });
 
 it('highlights whichever context is active', function () {
-    Challenge::factory()->create();
-    logMakeRate(40, 50, 12, Putter::Blade, PuttContext::Outside);
+    logMakeRate(40, 50, 12, blade(), PuttContext::Outside);
 
     $active = '/<a href="[^"]*"[^>]*ring-sky-500\/50[^>]*>\s*%s\s*<\/a>/';
 
@@ -276,23 +274,21 @@ it('highlights whichever context is active', function () {
 });
 
 it('shows the carpet versus greens breakdown for both putters', function () {
-    Challenge::factory()->create();
 
-    logMakeRate(40, 80, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(40, 55, 10, Putter::Blade, PuttContext::Outside);
-    logMakeRate(40, 60, 10, Putter::Mallet, PuttContext::Inside);
-    logMakeRate(40, 58, 10, Putter::Mallet, PuttContext::Outside);
+    logMakeRate(40, 80, 10, blade(), PuttContext::Inside);
+    logMakeRate(40, 55, 10, blade(), PuttContext::Outside);
+    logMakeRate(40, 60, 10, mallet(), PuttContext::Inside);
+    logMakeRate(40, 58, 10, mallet(), PuttContext::Outside);
 
     $this->get(route('stats'))
         ->assertOk()
         ->assertSee('Carpet vs. real greens')
-        ->assertSee('The mallet travels best');
+        ->assertSee('Mallet travels best');
 });
 
 it('hides the context switch and breakdown when scoped to a session', function () {
-    Challenge::factory()->create();
 
-    $session = PuttingSession::factory()->create();
+    $session = PuttingSession::factory()->for(blade())->create();
     Putt::factory()->count(10)->create(['putting_session_id' => $session->id]);
 
     $this->get(route('stats', ['session' => $session]))
@@ -302,22 +298,21 @@ it('hides the context switch and breakdown when scoped to a session', function (
 });
 
 it('filters the compare page to a context', function () {
-    logMakeRate(120, 80, 10, Putter::Blade, PuttContext::Inside);
-    logMakeRate(120, 40, 10, Putter::Blade, PuttContext::Outside);
-    logMakeRate(120, 50, 10, Putter::Mallet, PuttContext::Inside);
-    logMakeRate(120, 70, 10, Putter::Mallet, PuttContext::Outside);
+    logMakeRate(120, 80, 10, blade(), PuttContext::Inside);
+    logMakeRate(120, 40, 10, blade(), PuttContext::Outside);
+    logMakeRate(120, 50, 10, mallet(), PuttContext::Inside);
+    logMakeRate(120, 70, 10, mallet(), PuttContext::Outside);
 
     $this->get(route('stats.compare', ['context' => 'outside']))
         ->assertOk()
-        ->assertSee('Play the mallet');
+        ->assertSee('Play Mallet');
 
     $this->get(route('stats.compare', ['context' => 'inside']))
         ->assertOk()
-        ->assertSee('Play the blade');
+        ->assertSee('Play Blade');
 });
 
 it('shows the split dial and its toggle on the log screen', function () {
-    Challenge::factory()->create();
 
     $this->get(route('log'))
         ->assertOk()
@@ -328,7 +323,6 @@ it('shows the split dial and its toggle on the log screen', function () {
 });
 
 it('shows the stroke versus read breakdown once misses are classified', function () {
-    Challenge::factory()->create();
 
     logPutts(40, PuttResult::Sunk, 10);
     logCause(15, PuttResult::MissLeft, LineMissCause::Stroke);
@@ -342,7 +336,6 @@ it('shows the stroke versus read breakdown once misses are classified', function
 });
 
 it('hides the cause breakdown when nothing is classified', function () {
-    Challenge::factory()->create();
 
     logPutts(40, PuttResult::Sunk, 10);
     logPutts(20, PuttResult::MissLeft, 10);
@@ -354,7 +347,6 @@ it('hides the cause breakdown when nothing is classified', function () {
 });
 
 it('reports how many line misses were logged without a cause', function () {
-    Challenge::factory()->create();
 
     logPutts(40, PuttResult::Sunk, 10);
     logCause(10, PuttResult::MissLeft, LineMissCause::Stroke);
@@ -366,7 +358,6 @@ it('reports how many line misses were logged without a cause', function () {
 });
 
 it('shows the clock ring and the position bar on the log screen', function () {
-    Challenge::factory()->create();
 
     $this->get(route('log'))
         ->assertOk()
@@ -377,7 +368,6 @@ it('shows the clock ring and the position bar on the log screen', function () {
 });
 
 it('renders the log screen before any position has been chosen', function () {
-    Challenge::factory()->create();
 
     $this->get(route('log'))
         ->assertOk()
@@ -385,9 +375,8 @@ it('renders the log screen before any position has been chosen', function () {
 });
 
 it('shows the position heat map once putts carry a position', function () {
-    Challenge::factory()->create();
-    logMakeRate(40, 60, 10, Putter::Blade, PuttContext::Outside, PuttResult::MissShort, ClockPosition::Below);
-    logMakeRate(40, 20, 10, Putter::Blade, PuttContext::Outside, PuttResult::MissShort, ClockPosition::AboveRight);
+    logMakeRate(40, 60, 10, blade(), PuttContext::Outside, PuttResult::MissShort, ClockPosition::Below);
+    logMakeRate(40, 20, 10, blade(), PuttContext::Outside, PuttResult::MissShort, ClockPosition::AboveRight);
 
     $this->get(route('stats', ['context' => PuttContext::Outside->value]))
         ->assertOk()
@@ -396,7 +385,6 @@ it('shows the position heat map once putts carry a position', function () {
 });
 
 it('hides the heat map on the day nothing has a position yet', function () {
-    Challenge::factory()->create();
     logPutts(60, PuttResult::Sunk, 10);
 
     $this->get(route('stats'))
@@ -405,8 +393,7 @@ it('hides the heat map on the day nothing has a position yet', function () {
 });
 
 it('says untagged putts are unclassified rather than flat', function () {
-    Challenge::factory()->create();
-    logPutts(40, PuttResult::Sunk, 10, PuttContext::Outside, Putter::Blade, ClockPosition::Below);
+    logPutts(40, PuttResult::Sunk, 10, PuttContext::Outside, blade(), ClockPosition::Below);
     logPutts(25, PuttResult::MissShort, 10, PuttContext::Outside);
 
     $this->get(route('stats', ['context' => PuttContext::Outside->value]))
@@ -415,23 +402,21 @@ it('says untagged putts are unclassified rather than flat', function () {
 });
 
 it('shows the levelled make rate alongside the raw one', function () {
-    Challenge::factory()->create();
-    logMakeRate(120, 80, 3, Putter::Blade);
-    logMakeRate(120, 45, 10, Putter::Blade);
-    logMakeRate(120, 20, 20, Putter::Blade);
+    logMakeRate(120, 80, 3, blade());
+    logMakeRate(120, 45, 10, blade());
+    logMakeRate(120, 20, 20, blade());
 
-    $this->get(route('stats', ['putter' => Putter::Blade->value]))
+    $this->get(route('stats', ['putter' => blade()->id]))
         ->assertOk()
         ->assertSee('Make rate, levelled')
         ->assertSee('Levelled');
 });
 
 it('shows the levelled row on the compare page', function () {
-    Challenge::factory()->create();
-    logMakeRate(150, 80, 3, Putter::Blade);
-    logMakeRate(150, 50, 10, Putter::Blade);
-    logMakeRate(320, 66, 3, Putter::Mallet);
-    logMakeRate(70, 32, 10, Putter::Mallet);
+    logMakeRate(150, 80, 3, blade());
+    logMakeRate(150, 50, 10, blade());
+    logMakeRate(320, 66, 3, mallet());
+    logMakeRate(70, 32, 10, mallet());
 
     $this->get(route('stats.compare'))
         ->assertOk()
@@ -440,9 +425,40 @@ it('shows the levelled row on the compare page', function () {
 });
 
 it('renders the compare page when neither putter has a position yet', function () {
-    Challenge::factory()->create();
-    logMakeRate(60, 50, 10, Putter::Blade);
-    logMakeRate(60, 50, 10, Putter::Mallet);
+    logMakeRate(60, 50, 10, blade());
+    logMakeRate(60, 50, 10, mallet());
 
     $this->get(route('stats.compare'))->assertOk();
+});
+
+it('hides other players\' sessions', function () {
+    $theirs = PuttingSession::factory()->for(blade(User::factory()->create()))->create();
+    Putt::factory()->create(['putting_session_id' => $theirs->id]);
+
+    $this->get(route('sessions.show', $theirs))->assertNotFound();
+    $this->delete(route('sessions.destroy', $theirs))->assertNotFound();
+    $this->get(route('sessions.index'))->assertOk()->assertSee('No sessions yet');
+    // Asking the stats page for someone else's session falls back to your own overall view.
+    $this->get(route('stats', ['session' => $theirs->id]))->assertOk()->assertSee('Showing all putters');
+
+    expect(PuttingSession::query()->count())->toBe(1);
+});
+
+it('asks for a second putter before comparing', function () {
+    logMakeRate(20, 50, 10, blade());
+
+    $this->get(route('stats.compare'))
+        ->assertOk()
+        ->assertSee('Log putts with at least two putters');
+});
+
+it('compares whichever two putters are chosen', function () {
+    $third = putterNamed('Anser', PutterHeadType::Blade);
+    logMakeRate(20, 50, 10, blade());
+    logMakeRate(20, 50, 10, mallet());
+    logMakeRate(20, 50, 10, $third);
+
+    $this->get(route('stats.compare', ['first' => $third->id, 'second' => mallet()->id]))
+        ->assertOk()
+        ->assertSee('Log 80 more putts with Anser', false);
 });
