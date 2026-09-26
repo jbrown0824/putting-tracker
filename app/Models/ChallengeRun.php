@@ -45,6 +45,6 @@ class ChallengeRun extends Model
     /** @return HasMany<Putt, $this> */
     public function putts(): HasMany
     {
-        return $this->hasMany(Putt::class)->orderBy('hit_at')->orderBy('id');
+        return $this->hasMany(Putt::class);
     }
 }

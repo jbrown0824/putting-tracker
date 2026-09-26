@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\PuttSyncController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\ChallengeController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LogController;
 use App\Http\Controllers\PutterController;
@@ -31,6 +32,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/sessions/{session}', [SessionController::class, 'show'])->name('sessions.show');
     Route::delete('/sessions/{session}', [SessionController::class, 'destroy'])->name('sessions.destroy');
     Route::delete('/sessions/{session}/putts/{putt}', [SessionController::class, 'destroyPutt'])->name('sessions.putts.destroy');
+
+    Route::resource('challenges', ChallengeController::class);
+    Route::patch('/challenges/{challenge}/archive', [ChallengeController::class, 'archive'])->name('challenges.archive');
 
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
     Route::patch('/settings/account', [SettingsController::class, 'updateAccount'])->name('settings.account');

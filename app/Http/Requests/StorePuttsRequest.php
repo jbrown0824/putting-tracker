@@ -39,6 +39,10 @@ class StorePuttsRequest extends FormRequest
             // reconstruct the position exactly.
             'putts.*.slope' => ['nullable', Rule::enum(PuttSlope::class)],
             'putts.*.break_direction' => ['nullable', 'string', 'max:40'],
+            // Set only on putts hit while a guided drill was focused.
+            'putts.*.challenge_id' => ['nullable', 'integer'],
+            'putts.*.challenge_run_uuid' => ['nullable', 'uuid'],
+            'putts.*.drill_step' => ['nullable', 'integer', 'min:0', 'max:500'],
             'putts.*.location' => ['nullable', 'string', 'max:120'],
             'putts.*.notes' => ['nullable', 'string', 'max:500'],
             'putts.*.hit_at' => ['required', 'date'],

@@ -8,6 +8,7 @@ use App\Enums\PuttContext;
 use App\Enums\PuttResult;
 use App\Enums\PuttSlope;
 use App\Enums\SurfaceType;
+use App\Models\ChallengeRun;
 use App\Models\Putter;
 use App\Models\User;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,10 @@ use Illuminate\Support\Facades\DB;
 
 class RecordPutts
 {
-    public function __construct(private ResolvePuttingSession $resolveSession) {}
+    public function __construct(
+        private ResolvePuttingSession $resolveSession,
+        private SettleDrillRuns $settleRuns,
+    ) {}
 
     /**
      * Persist a batch of putts from the client queue.
@@ -31,9 +35,11 @@ class RecordPutts
     public function execute(User $user, array $putts): array
     {
         $putters = $user->putters()->get()->keyBy('id');
+        $drills = $user->challenges()->where('kind', 'drill')->pluck('id')->flip();
 
-        return DB::transaction(function () use ($user, $putts, $putters): array {
+        return DB::transaction(function () use ($user, $putts, $putters, $drills): array {
             $stored = [];
+            $runs = [];
 
             foreach ($putts as $putt) {
                 $hitAt = Carbon::parse($putt['hit_at']);
@@ -47,6 +53,12 @@ class RecordPutts
                     'location' => $putt['location'] ?? null,
                 ]);
 
+                $run = $this->resolveRun($user, $drills, $putt, $hitAt);
+
+                if ($run !== null) {
+                    $runs[$run->id] = $run;
+                }
+
                 $user->putts()->updateOrCreate(
                     ['uuid' => $putt['uuid']],
                     [
@@ -59,6 +71,8 @@ class RecordPutts
                         'surface_type' => $surfaceType,
                         'slope' => $this->resolveSlope($putt, $position),
                         'clock_position' => $position,
+                        'challenge_run_id' => $run?->id,
+                        'drill_step' => $run !== null ? ($putt['drill_step'] ?? null) : null,
                         'notes' => $putt['notes'] ?? null,
                         'hit_at' => $hitAt,
                     ],
@@ -67,8 +81,32 @@ class RecordPutts
                 $stored[] = $putt['uuid'];
             }
 
+            $this->settleRuns->execute($runs);
+
             return $stored;
         });
+    }
+
+    /**
+     * The drill run a putt was hit in, created on first sight since the phone
+     * starts runs offline. A run naming a challenge that is not one of this
+     * player's drills is dropped rather than rejected — the putt itself still counts.
+     *
+     * @param  Collection<int, int>  $drills  the player's drill challenge ids, as keys
+     * @param  array<string, mixed>  $putt
+     */
+    private function resolveRun(User $user, Collection $drills, array $putt, Carbon $hitAt): ?ChallengeRun
+    {
+        if (! isset($putt['challenge_run_uuid'], $putt['challenge_id']) || ! $drills->has((int) $putt['challenge_id'])) {
+            return null;
+        }
+
+        $run = $user->challengeRuns()->firstOrCreate(
+            ['uuid' => $putt['challenge_run_uuid']],
+            ['challenge_id' => (int) $putt['challenge_id'], 'started_at' => $hitAt],
+        );
+
+        return $run->challenge_id === (int) $putt['challenge_id'] ? $run : null;
     }
 
     /**

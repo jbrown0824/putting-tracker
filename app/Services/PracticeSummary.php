@@ -8,12 +8,14 @@ use Illuminate\Support\Carbon;
 
 class PracticeSummary
 {
+    public function __construct(private ChallengeProgress $progress) {}
+
     /**
-     * The running tally the logger shows: today and this week, counted in the
-     * player's own calendar rather than UTC, so a late-evening session lands on the
-     * day it was actually hit.
+     * Everything the logger shows above the dial: today and this week, counted in
+     * the player's own calendar rather than UTC so a late-evening session lands on
+     * the day it was actually hit, plus every challenge running today.
      *
-     * @return array{today: array{total: int, sunk: int}, week: array{total: int, sunk: int}}
+     * @return array{today: array{total: int, sunk: int}, week: array{total: int, sunk: int}, challenges: array<int, array<string, mixed>>}
      */
     public function for(User $user): array
     {
@@ -22,6 +24,14 @@ class PracticeSummary
         return [
             'today' => $this->countBetween($user, $now->copy()->startOfDay(), $now->copy()->endOfDay()),
             'week' => $this->countBetween($user, $now->copy()->startOfWeek(), $now->copy()->endOfWeek()),
+            'challenges' => $user->challenges()
+                ->activeOn($now)
+                ->with(['user', 'putters', 'goals', 'steps'])
+                ->orderBy('starts_on')
+                ->get()
+                ->map(fn ($challenge): array => $this->progress->forLogger($challenge))
+                ->values()
+                ->all(),
         ];
     }
 

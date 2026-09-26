@@ -56,34 +56,85 @@
             You've been signed out. <span class="underline">Log in</span> to sync <span x-text="pending"></span> saved putts.
         </a>
 
+        {{-- The focused challenge: its goals, or for a drill, where to putt from next. --}}
+        <template x-if="focused">
+            <div class="mt-2 rounded-lg bg-slate-900 p-3 ring-1"
+                 :class="countsFor(focused) ? 'ring-emerald-500/30' : 'ring-amber-500/40'">
+                <div class="flex items-start justify-between gap-2">
+                    <a :href="`{{ url('challenges') }}/${focused.id}`" class="min-w-0 truncate text-sm font-medium text-slate-100" x-text="focused.name"></a>
+                    <button type="button" @click="unfocus()" class="shrink-0 text-[11px] text-slate-500" aria-label="Stop focusing">Unfocus ✕</button>
+                </div>
+
+                <template x-if="drillStep">
+                    <div class="mt-2 flex items-center justify-between gap-2">
+                        <div>
+                            <div class="text-2xl font-medium text-slate-50">
+                                <span x-text="drillStep.distance"></span><span class="text-sm text-slate-400"> ft</span>
+                                <span class="text-sm text-sky-300" x-show="drillStep.clock" x-text="`· ${drillStep.clock}`"></span>
+                            </div>
+                            <div class="text-[11px] text-slate-400">
+                                Step <span x-text="drillStep.number"></span> of <span x-text="drillStep.total"></span>
+                                <span x-show="drillStep.rounds > 1" x-text="`· round ${drillStep.round} of ${drillStep.rounds}`"></span>
+                                · make <span x-text="drillStep.needed"></span> more
+                                · <span x-text="drillStep.attempts"></span> putts
+                            </div>
+                        </div>
+                        <button type="button" @click="restartDrill()" class="shrink-0 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-400">Restart</button>
+                    </div>
+                </template>
+
+                <template x-for="goal in focusedGoals" :key="goal.id">
+                    <div class="mt-1.5 text-xs" :class="goal.done ? 'text-emerald-300' : 'text-slate-300'">
+                        <div class="text-[10px] uppercase tracking-wide text-slate-500" x-text="goal.label"></div>
+                        <div x-text="goal.line"></div>
+                    </div>
+                </template>
+
+                <p x-show="! countsFor(focused)" class="mt-1.5 text-[11px] text-amber-300">This setup doesn't count toward this challenge.</p>
+            </div>
+        </template>
+
+        <div x-show="celebration" x-transition class="mt-2 rounded-lg bg-emerald-500/15 px-3 py-2 text-sm text-emerald-200" x-text="celebration"></div>
+
+        {{-- Everything running today. A lit dot means the next putt counts toward it; tap to focus. --}}
+        <div x-show="! focused && challenges.length > 0" class="-mx-4 mt-2 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
+            <template x-for="challenge in challenges" :key="challenge.id">
+                <button type="button" @click="focus(challenge.id)"
+                        class="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-800 px-2.5 py-1 text-[11px] text-slate-400">
+                    <span class="size-1.5 rounded-full" :class="countsFor(challenge) ? 'bg-emerald-400' : 'bg-slate-700'"></span>
+                    <span x-text="challenge.name"></span>
+                </button>
+            </template>
+        </div>
+
         {{-- Scrolls sideways rather than wrapping, so a full bag never pushes the dial down. --}}
         <div class="-mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
-            <template x-for="option in putters" :key="option.id">
+            <template x-for="option in putters.filter((p) => ! putterLocked || p.id === putterId)" :key="option.id">
                 <button type="button" @click="setPutter(option.id)"
                         class="shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition"
                         :class="putterId === option.id ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50' : 'border border-slate-800 text-slate-500'"
                         x-text="option.name"></button>
             </template>
-            <a href="{{ route('putters.create') }}"
+            <a href="{{ route('putters.create') }}" x-show="! putterLocked"
                class="shrink-0 rounded-lg border border-dashed border-slate-800 px-3 py-2 text-xs text-slate-600">+ Putter</a>
         </div>
 
         <div class="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" @click="setContext('inside')"
+            <button type="button" @click="setContext('inside')" :disabled="contextLocked"
                     class="rounded-lg py-3 text-sm font-medium transition"
-                    :class="context === 'inside' ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'">
+                    :class="context === 'inside' ? 'bg-slate-100 text-slate-900' : (contextLocked ? 'border border-slate-900 text-slate-700' : 'border border-slate-700 text-slate-400')">
                 Inside
             </button>
-            <button type="button" @click="setContext('outside')"
+            <button type="button" @click="setContext('outside')" :disabled="contextLocked"
                     class="rounded-lg py-3 text-sm font-medium transition"
-                    :class="context === 'outside' ? 'bg-slate-100 text-slate-900' : 'border border-slate-700 text-slate-400'">
+                    :class="context === 'outside' ? 'bg-slate-100 text-slate-900' : (contextLocked ? 'border border-slate-900 text-slate-700' : 'border border-slate-700 text-slate-400')">
                 Outside
             </button>
         </div>
 
         {{-- Optional detail on top of inside/outside. Tapping the chosen one clears it. --}}
         <div class="mt-1.5 flex flex-wrap gap-1.5">
-            <template x-for="type in surfaceOptions" :key="type.value">
+            <template x-for="type in surfaceOptions.filter((t) => ! surfaceLocked || t.value === surfaceType)" :key="type.value">
                 <button type="button" @click="setSurfaceType(type.value)"
                         class="rounded-md px-2.5 py-1 text-[11px] transition"
                         :class="surfaceType === type.value ? 'bg-slate-700 text-slate-100' : 'border border-slate-800 text-slate-500'"
@@ -118,17 +169,17 @@
         @include('partials.clock-ring')
 
         <div class="mt-4 flex items-center justify-between">
-            <button type="button" @click="stepDistance(-1)" aria-label="Shorter"
+            <button type="button" @click="stepDistance(-1)" aria-label="Shorter" :class="distanceLocked && 'invisible'"
                     class="flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 text-2xl text-slate-300 active:bg-slate-800">−</button>
 
             <div class="text-center">
-                <input type="number" inputmode="numeric" :value="distance" @change="setDistance($event.target.value)"
+                <input type="number" inputmode="numeric" :value="distance" @change="setDistance($event.target.value)" :readonly="distanceLocked"
                        aria-label="Distance in feet"
                        class="w-24 bg-transparent text-center text-3xl font-medium text-slate-50 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none">
-                <div class="text-[11px] text-slate-500">feet · tap to edit</div>
+                <div class="text-[11px] text-slate-500" x-text="distanceLocked ? 'feet · set by the challenge' : 'feet · tap to edit'"></div>
             </div>
 
-            <button type="button" @click="stepDistance(1)" aria-label="Longer"
+            <button type="button" @click="stepDistance(1)" aria-label="Longer" :class="distanceLocked && 'invisible'"
                     class="flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 text-2xl text-slate-300 active:bg-slate-800">+</button>
         </div>
 

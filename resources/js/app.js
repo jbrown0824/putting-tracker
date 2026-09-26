@@ -1,4 +1,7 @@
 import Alpine from 'alpinejs';
+import challengeForm from './challenge-form';
+import { countsToward, goalDone, goalLine, liveGoal } from './challenges';
+import { applyShot, currentStep, makesRequired, startDrill } from './drill';
 
 /**
  * Storage is keyed per player, so two people sharing a phone can never post each
@@ -7,6 +10,10 @@ import Alpine from 'alpinejs';
  */
 const queueKey = (userId) => `putt-queue:${userId}`;
 const prefsKey = (userId) => `putt-prefs:${userId}`;
+// Which challenge the logger is focused on lives in this browser only.
+const focusKey = (userId) => `putt-focus:${userId}`;
+// A drill's place survives a reload, so leaving the page mid-ladder loses nothing.
+const drillKey = (userId, challengeId) => `putt-drill:${userId}:${challengeId}`;
 const LEGACY_KEYS = ['putt-queue', 'putt-prefs'];
 
 /**
@@ -74,6 +81,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     flash: null,
     flashCause: null,
     locked: false,
+    focusId: null,
+    drillRun: null,
+    drillHistory: [],
+    celebration: null,
 
     init() {
         LEGACY_KEYS.forEach((key) => {
@@ -94,6 +105,8 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
         this.advancedMisses = prefs.advancedMisses ?? false;
         this.location = prefs.location ?? '';
         this.queue = read(queueKey(this.userId), []);
+        this.focusId = read(focusKey(this.userId), {}).id ?? null;
+        this.applyFocus();
 
         window.addEventListener('online', () => {
             this.online = true;
@@ -138,6 +151,180 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
         return this.surfaceTypes[this.context] ?? [];
     },
 
+    get challenges() {
+        return this.synced.challenges ?? [];
+    },
+
+    /**
+     * The focused challenge, or null once it has ended or been deleted — the
+     * stored id is simply ignored until the player picks another.
+     */
+    get focused() {
+        return this.challenges.find((challenge) => challenge.id === this.focusId) ?? null;
+    },
+
+    get focusedGoals() {
+        return (this.focused?.goals ?? []).map((goal) => {
+            const live = liveGoal(this.focused, goal, this.queue);
+
+            return { ...live, done: goalDone(live), line: goalLine(live) };
+        });
+    },
+
+    /**
+     * The putt the next tap would log, in the shape the eligibility rules read.
+     */
+    get nextPutt() {
+        return {
+            putter_id: this.putterId,
+            context: this.context,
+            surface_type: this.surfaceType,
+            distance_ft: this.distance,
+        };
+    },
+
+    countsFor(challenge) {
+        return countsToward(challenge, this.nextPutt);
+    },
+
+    get putterLocked() {
+        return (this.focused?.eligibility.putter_ids.length ?? 0) === 1;
+    },
+
+    get contextLocked() {
+        return (this.focused?.eligibility.contexts.length ?? 0) === 1;
+    },
+
+    get surfaceLocked() {
+        return (this.focused?.eligibility.surface_types.length ?? 0) === 1;
+    },
+
+    get distanceLocked() {
+        const rules = this.focused?.eligibility;
+
+        return Boolean(this.focused?.drill)
+            || (rules && rules.min_distance_ft !== null && rules.min_distance_ft === rules.max_distance_ft);
+    },
+
+    focus(id) {
+        this.focusId = id;
+        write(focusKey(this.userId), { id });
+        this.applyFocus();
+    },
+
+    unfocus() {
+        this.focusId = null;
+        this.drillRun = null;
+        this.drillHistory = [];
+        write(focusKey(this.userId), {});
+    },
+
+    /**
+     * When the focused challenge allows exactly one putter, place or surface,
+     * the logger shows that one and stops offering the others. A drill goes
+     * further and sets the distance and spot for every putt.
+     */
+    applyFocus() {
+        const challenge = this.focused;
+
+        if (!challenge) {
+            this.drillRun = null;
+
+            return;
+        }
+
+        const rules = challenge.eligibility;
+
+        if (rules.putter_ids.length === 1 && this.putters.some((p) => p.id === rules.putter_ids[0])) {
+            this.putterId = rules.putter_ids[0];
+        }
+
+        if (rules.contexts.length === 1 && this.context !== rules.contexts[0]) {
+            this.surfaceType = null;
+            this.context = rules.contexts[0];
+        }
+
+        if (rules.surface_types.length === 1) {
+            this.surfaceType = rules.surface_types[0];
+        }
+
+        if (rules.min_distance_ft !== null && rules.min_distance_ft === rules.max_distance_ft) {
+            this.distance = rules.min_distance_ft;
+        }
+
+        if (challenge.drill) {
+            this.drillRun = read(drillKey(this.userId, challenge.id), null) ?? this.newDrillRun();
+            this.syncDrillPosition();
+        } else {
+            this.drillRun = null;
+        }
+
+        this.savePrefs();
+    },
+
+    newDrillRun() {
+        return { uuid: uuid(), state: startDrill(this.focused.drill) };
+    },
+
+    saveDrill() {
+        if (this.focused && this.drillRun) {
+            write(drillKey(this.userId, this.focused.id), this.drillRun);
+        }
+    },
+
+    restartDrill() {
+        this.drillRun = this.newDrillRun();
+        this.drillHistory = [];
+        this.saveDrill();
+        this.syncDrillPosition();
+    },
+
+    get drillStep() {
+        if (!this.focused?.drill || !this.drillRun) {
+            return null;
+        }
+
+        const drill = this.focused.drill;
+        const index = currentStep(drill, this.drillRun.state);
+        const step = drill.steps[index];
+
+        if (!step) {
+            return null;
+        }
+
+        return {
+            index,
+            number: this.drillRun.state.cleared.length + 1,
+            total: drill.steps.length,
+            round: this.drillRun.state.round + 1,
+            rounds: drill.rounds,
+            distance: step.distance_ft,
+            clock: step.clock_position ? this.clockLabels[step.clock_position]?.clock : null,
+            needed: makesRequired(drill, index) - this.drillRun.state.streak,
+            attempts: this.drillRun.state.attempts,
+        };
+    },
+
+    /**
+     * Put the ball where the drill says: its distance always, and its spot on the
+     * clock when the step names one.
+     */
+    syncDrillPosition() {
+        const step = this.drillStep;
+
+        if (!step) {
+            return;
+        }
+
+        this.distance = step.distance;
+
+        const position = this.focused.drill.steps[step.index].clock_position;
+
+        if (position) {
+            this.clockPosition = position;
+        }
+    },
+
     get sessionCount() {
         return this.sessionPutts.length;
     },
@@ -167,6 +354,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     },
 
     setContext(context) {
+        if (this.contextLocked) {
+            return;
+        }
+
         // "Flat" is a claim about the surface, and it is only reliably true of the
         // indoor mat. Stepping outside retires the claim rather than carrying it
         // silently onto a green that has a fall line — the bar then prompts for a
@@ -187,6 +378,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     },
 
     setSurfaceType(type) {
+        if (this.surfaceLocked) {
+            return;
+        }
+
         this.surfaceType = this.surfaceType === type ? null : type;
         this.savePrefs();
     },
@@ -220,6 +415,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     },
 
     setPutter(putterId) {
+        if (this.putterLocked) {
+            return;
+        }
+
         this.putterId = putterId;
         this.savePrefs();
     },
@@ -230,6 +429,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     },
 
     stepDistance(direction) {
+        if (this.distanceLocked) {
+            return;
+        }
+
         const index = this.ladder.indexOf(this.distance);
 
         if (index === -1) {
@@ -246,6 +449,10 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
     },
 
     setDistance(value) {
+        if (this.distanceLocked) {
+            return;
+        }
+
         const parsed = parseInt(value, 10);
 
         if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 120) {
@@ -279,6 +486,18 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
             hit_at: new Date().toISOString(),
         };
 
+        const step = this.drillStep;
+
+        if (step) {
+            Object.assign(putt, {
+                distance_ft: step.distance,
+                challenge_id: this.focused.id,
+                challenge_run_uuid: this.drillRun.uuid,
+                drill_step: step.index,
+            });
+            this.advanceDrill(putt, result === 'sunk');
+        }
+
         this.queue.push(putt);
         this.recent.unshift(putt);
         write(queueKey(this.userId), this.queue);
@@ -294,11 +513,38 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
         this.flush();
     },
 
+    /**
+     * Move the drill on after a shot, keeping the previous place so undo can put
+     * the player back exactly where they were.
+     */
+    advanceDrill(putt, made) {
+        this.drillHistory.push({ uuid: putt.uuid, run: this.drillRun });
+
+        const state = applyShot(this.focused.drill, this.drillRun.state, made);
+
+        if (state.completed) {
+            this.celebration = `${this.focused.name} finished in ${state.attempts} putts!`;
+            setTimeout(() => (this.celebration = null), 6000);
+            this.drillRun = this.newDrillRun();
+        } else {
+            this.drillRun = { ...this.drillRun, state };
+        }
+
+        this.saveDrill();
+        this.syncDrillPosition();
+    },
+
     async undo() {
         const last = this.recent.shift();
 
         if (!last) {
             return;
+        }
+
+        if (this.drillHistory.at(-1)?.uuid === last.uuid) {
+            this.drillRun = this.drillHistory.pop().run;
+            this.saveDrill();
+            this.syncDrillPosition();
         }
 
         const queued = this.queue.findIndex((p) => p.uuid === last.uuid);
@@ -381,7 +627,13 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
                 write(queueKey(this.userId), this.queue);
 
                 if (data.progress) {
+                    const hadFocus = this.focused !== null;
                     this.synced = data.progress;
+
+                    // The first sync of a page opened offline brings the challenges in.
+                    if (!hadFocus && this.focused) {
+                        this.applyFocus();
+                    }
                 }
 
                 drained = true;
@@ -435,6 +687,19 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
 
     get wakeLockSupported() {
         return 'wakeLock' in navigator;
+    },
+}));
+
+Alpine.data('challengeForm', challengeForm);
+
+/**
+ * Point the logger at a challenge and go there. Focus is remembered in this
+ * browser only, keyed per player like everything else the logger stores.
+ */
+Alpine.data('focusChallenge', (userId, challengeId, logUrl) => ({
+    go() {
+        write(focusKey(userId), { id: challengeId });
+        window.location = logUrl;
     },
 }));
 

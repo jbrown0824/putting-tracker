@@ -5,6 +5,7 @@ use App\Enums\LineMissCause;
 use App\Enums\PuttContext;
 use App\Enums\PutterHeadType;
 use App\Enums\PuttResult;
+use App\Models\Challenge;
 use App\Models\Putt;
 use App\Models\Putter;
 use App\Models\PuttingSession;
@@ -103,6 +104,7 @@ function logPutts(
     PuttContext $context = PuttContext::Inside,
     ?Putter $putter = null,
     ?ClockPosition $position = null,
+    ?Carbon $hitAt = null,
 ): void {
     $putter ??= blade();
 
@@ -118,7 +120,7 @@ function logPutts(
         // Null by default, matching every putt logged before positions existed.
         'clock_position' => $position,
         'slope' => $position?->slope(),
-        'hit_at' => Carbon::now(),
+        'hit_at' => $hitAt ?? Carbon::now(),
     ]);
 }
 
@@ -178,4 +180,21 @@ function logCause(int $count, PuttResult $result, ?LineMissCause $cause, PuttCon
         'context' => $context,
         'hit_at' => Carbon::now(),
     ]);
+}
+
+/**
+ * A challenge for the test player with the given goals.
+ *
+ * @param  array<string, mixed>  $attributes
+ * @param  array<int, array<string, mixed>>  $goals
+ */
+function challengeWith(array $attributes = [], array $goals = []): Challenge
+{
+    $challenge = Challenge::factory()->for(testUser())->create($attributes);
+
+    foreach ($goals as $index => $goal) {
+        $challenge->goals()->create([...$goal, 'sort_order' => $index]);
+    }
+
+    return $challenge->fresh();
 }

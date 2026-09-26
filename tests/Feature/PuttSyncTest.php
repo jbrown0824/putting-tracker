@@ -4,10 +4,13 @@ use App\Actions\ResolvePuttingSession;
 use App\Enums\ClockPosition;
 use App\Enums\PuttSlope;
 use App\Enums\SurfaceType;
+use App\Models\Challenge;
+use App\Models\ChallengeRun;
 use App\Models\Putt;
 use App\Models\PuttingSession;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 beforeEach(fn () => $this->actingAs(testUser()));
 
@@ -265,4 +268,53 @@ it('leaves a stale putt unclassified when it sent a break but no slope', functio
     ])->assertOk();
 
     expect(Putt::first()->clock_position)->toBeNull();
+});
+
+it('files drill putts under a run and marks it finished once the ladder is climbed', function () {
+    $drill = Challenge::factory()->drill()->for(testUser())->create();
+    foreach ([3, 4] as $index => $distance) {
+        $drill->steps()->create(['sort_order' => $index, 'distance_ft' => $distance]);
+    }
+    $run = (string) Str::uuid();
+    $start = Carbon::parse('2026-09-10 10:00:00');
+    $drillPutt = fn (int $second, string $result, int $step): array => puttPayload([
+        'hit_at' => $start->copy()->addSeconds($second)->toIso8601String(),
+        'result' => $result,
+        'challenge_id' => $drill->id,
+        'challenge_run_uuid' => $run,
+        'drill_step' => $step,
+    ]);
+
+    // Delivered out of order across two batches, as an offline phone might.
+    $this->postJson(route('api.putts.sync'), ['putts' => [$drillPutt(30, 'sunk', 1)]])->assertOk();
+    $this->postJson(route('api.putts.sync'), ['putts' => [$drillPutt(0, 'sunk', 0), $drillPutt(10, 'miss_short', 1), $drillPutt(20, 'sunk', 0)]])->assertOk();
+
+    $stored = ChallengeRun::query()->sole();
+
+    expect($stored->putts()->count())->toBe(4)
+        ->and($stored->started_at->toDateTimeString())->toBe('2026-09-10 10:00:00')
+        ->and($stored->completed_at->toDateTimeString())->toBe('2026-09-10 10:00:30');
+});
+
+it('ignores a run that names someone else\'s drill but still keeps the putt', function () {
+    $theirs = Challenge::factory()->drill()->create();
+
+    $this->postJson(route('api.putts.sync'), ['putts' => [puttPayload([
+        'challenge_id' => $theirs->id,
+        'challenge_run_uuid' => (string) Str::uuid(),
+        'drill_step' => 0,
+    ])]])->assertOk();
+
+    expect(Putt::query()->sole()->challenge_run_id)->toBeNull()
+        ->and(ChallengeRun::query()->count())->toBe(0);
+});
+
+it('returns the progress of every challenge running today', function () {
+    $challenge = challengeWith([], [['metric' => 'attempts', 'period' => 'daily', 'target' => 50]]);
+
+    $response = $this->postJson(route('api.putts.sync'), ['putts' => [puttPayload(), puttPayload()]])->assertOk();
+
+    expect($response->json('progress.challenges.0.id'))->toBe($challenge->id)
+        ->and($response->json('progress.challenges.0.goals.0.current.value'))->toBe(2)
+        ->and($response->json('progress.challenges.0.goals.0.current.remaining'))->toBe(48);
 });

@@ -20,10 +20,11 @@
         </main>
 
         @auth
-        <nav class="sticky bottom-0 mt-4 grid grid-cols-4 border-t border-slate-800 bg-slate-950/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
+        <nav class="sticky bottom-0 mt-4 grid grid-cols-5 border-t border-slate-800 bg-slate-950/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
             @php
                 $tabs = [
                     ['route' => 'log', 'label' => 'Log'],
+                    ['route' => 'challenges.index', 'label' => 'Challenges', 'also' => ['challenges.*']],
                     ['route' => 'stats', 'label' => 'Stats', 'also' => ['stats.*']],
                     ['route' => 'sessions.index', 'label' => 'History'],
                     ['route' => 'settings', 'label' => 'Settings', 'also' => ['putters.*']],
@@ -31,7 +32,7 @@
             @endphp
             @foreach ($tabs as $tab)
                 <a href="{{ route($tab['route']) }}"
-                   class="py-2 text-center text-sm font-medium {{ request()->routeIs($tab['route'], ...($tab['also'] ?? [])) ? 'text-emerald-400' : 'text-slate-500' }}">
+                   class="py-2 text-center text-[13px] font-medium {{ request()->routeIs($tab['route'], ...($tab['also'] ?? [])) ? 'text-emerald-400' : 'text-slate-500' }}">
                     {{ $tab['label'] }}
                 </a>
             @endforeach
