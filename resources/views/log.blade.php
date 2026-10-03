@@ -75,7 +75,8 @@
                             <div class="text-[11px] text-slate-400">
                                 Step <span x-text="drillStep.number"></span> of <span x-text="drillStep.total"></span>
                                 <span x-show="drillStep.rounds > 1" x-text="`· round ${drillStep.round} of ${drillStep.rounds}`"></span>
-                                · make <span x-text="drillStep.needed"></span> more
+                                · sink <span x-text="drillStep.needed"></span> more
+                                <span x-show="drillStep.triesLeft !== null" x-text="`in ${drillStep.triesLeft} ${drillStep.triesLeft === 1 ? 'try' : 'tries'}`"></span>
                                 · <span x-text="drillStep.attempts"></span> putts
                             </div>
                         </div>

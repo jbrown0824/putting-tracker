@@ -77,7 +77,39 @@ it('creates a classic ladder drill with one make per rung by default', function 
     expect($drill->kind)->toBe(ChallengeKind::Drill)
         ->and($drill->steps->pluck('distance_ft')->all())->toBe(range(3, 10))
         ->and($drill->drill_on_miss)->toBe(DrillMissRule::Restart)
+        ->and($drill->drill_makes_required)->toBe(1)
+        ->and($drill->drill_attempts)->toBe(1);
+});
+
+it('stores attempts and sunk per rung on a drill', function () {
+    $this->post(route('challenges.store'), challengeForm([
+        'kind' => 'drill',
+        'goals' => [],
+        'steps' => [['distance_ft' => 3], ['distance_ft' => 4]],
+        'drill_on_miss' => 'restart',
+        'drill_order' => 'sequential',
+        'drill_attempts' => 2,
+        'drill_makes_required' => 1,
+    ]))->assertRedirect();
+
+    $drill = Challenge::query()->sole();
+
+    expect($drill->drill_attempts)->toBe(2)
         ->and($drill->drill_makes_required)->toBe(1);
+
+    $this->get(route('challenges.show', $drill))->assertOk()->assertSee('3ft · 1 of 2');
+});
+
+it('rejects a drill that needs more sunk than it has attempts', function () {
+    $this->post(route('challenges.store'), challengeForm([
+        'kind' => 'drill',
+        'goals' => [],
+        'steps' => [['distance_ft' => 3]],
+        'drill_on_miss' => 'restart',
+        'drill_order' => 'sequential',
+        'drill_attempts' => 2,
+        'drill_makes_required' => 3,
+    ]))->assertSessionHasErrors('drill_makes_required');
 });
 
 it('requires a goal on a goals challenge and a step on a drill', function () {

@@ -104,6 +104,7 @@ export default (initial, options) => ({
             drill_on_miss: 'restart',
             drill_order: 'sequential',
             drill_makes_required: 1,
+            drill_attempts: 1,
             drill_rounds: 1,
         };
 

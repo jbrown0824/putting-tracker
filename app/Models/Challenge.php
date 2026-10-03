@@ -36,6 +36,7 @@ class Challenge extends Model
         'drill_on_miss',
         'drill_order',
         'drill_makes_required',
+        'drill_attempts',
         'drill_rounds',
         'archived_at',
     ];
@@ -53,6 +54,7 @@ class Challenge extends Model
             'drill_on_miss' => DrillMissRule::class,
             'drill_order' => DrillOrder::class,
             'drill_makes_required' => 'integer',
+            'drill_attempts' => 'integer',
             'drill_rounds' => 'integer',
             'archived_at' => 'datetime',
         ];
@@ -168,6 +170,23 @@ class Challenge extends Model
     public function hasEnded(Carbon $today): bool
     {
         return $this->ends_on !== null && $today->toDateString() > $this->ends_on->toDateString();
+    }
+
+    /**
+     * How many putts must be sunk to clear a step: the step's own figure, else the drill's.
+     */
+    public function sunkRequiredFor(ChallengeStep $step): int
+    {
+        return max(1, $step->makes_required ?? $this->drill_makes_required);
+    }
+
+    /**
+     * How many putts a step allows. Never fewer than it needs sunk, so a step that
+     * asks for more than the drill's attempts simply has to be sunk every time.
+     */
+    public function attemptsFor(ChallengeStep $step): int
+    {
+        return max($this->sunkRequiredFor($step), $this->drill_attempts ?? 1);
     }
 
     public function isDrill(): bool

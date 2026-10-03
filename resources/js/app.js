@@ -1,7 +1,7 @@
 import Alpine from 'alpinejs';
 import challengeForm from './challenge-form';
 import { countsToward, goalDone, goalLine, liveGoal } from './challenges';
-import { applyShot, currentStep, makesRequired, startDrill } from './drill';
+import { applyShot, attemptsAllowed, currentStep, startDrill, sunkRequired } from './drill';
 
 /**
  * Storage is keyed per player, so two people sharing a phone can never post each
@@ -285,23 +285,29 @@ Alpine.data('puttTracker', (initialProgress, ladder, clock, setup) => ({
         }
 
         const drill = this.focused.drill;
-        const index = currentStep(drill, this.drillRun.state);
+        const state = this.drillRun.state;
+        const index = currentStep(drill, state);
         const step = drill.steps[index];
 
         if (!step) {
             return null;
         }
 
+        const required = sunkRequired(drill, index);
+        const allowed = attemptsAllowed(drill, index);
+
         return {
             index,
-            number: this.drillRun.state.cleared.length + 1,
+            number: state.cleared.length + 1,
             total: drill.steps.length,
-            round: this.drillRun.state.round + 1,
+            round: state.round + 1,
             rounds: drill.rounds,
             distance: step.distance_ft,
             clock: step.clock_position ? this.clockLabels[step.clock_position]?.clock : null,
-            needed: makesRequired(drill, index) - this.drillRun.state.streak,
-            attempts: this.drillRun.state.attempts,
+            needed: required - (state.stepSunk ?? state.streak ?? 0),
+            // Only worth showing when the step can absorb a miss.
+            triesLeft: allowed > required ? allowed - (state.stepPutts ?? state.streak ?? 0) : null,
+            attempts: state.attempts,
         };
     },
 

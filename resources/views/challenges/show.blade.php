@@ -59,8 +59,17 @@
 
             <div class="mt-2 flex flex-wrap gap-1">
                 @foreach ($challenge->steps as $step)
+                    @php
+                        $sunk = $challenge->sunkRequiredFor($step);
+                        $attempts = $challenge->attemptsFor($step);
+                        $requirement = match (true) {
+                            $attempts > $sunk => " · {$sunk} of {$attempts}",
+                            $sunk > 1 => " ×{$sunk}",
+                            default => '',
+                        };
+                    @endphp
                     <span class="rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-300">
-                        {{ $step->distance_ft }}ft{{ $step->clock_position ? ' · '.$step->clock_position->clockLabel() : '' }}{{ ($step->makes_required ?? $challenge->drill_makes_required) > 1 ? ' ×'.($step->makes_required ?? $challenge->drill_makes_required) : '' }}
+                        {{ $step->distance_ft }}ft{{ $step->clock_position ? ' · '.$step->clock_position->clockLabel() : '' }}{{ $requirement }}
                     </span>
                 @endforeach
             </div>

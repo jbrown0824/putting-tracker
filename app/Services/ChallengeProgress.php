@@ -89,6 +89,7 @@ class ChallengeProgress
                 'on_miss' => $challenge->drill_on_miss?->value,
                 'order' => $challenge->drill_order?->value,
                 'makes_required' => $challenge->drill_makes_required,
+                'attempts' => $challenge->drill_attempts,
                 'rounds' => $challenge->drill_rounds,
                 'steps' => $challenge->steps->map(fn ($step): array => [
                     'distance_ft' => $step->distance_ft,
