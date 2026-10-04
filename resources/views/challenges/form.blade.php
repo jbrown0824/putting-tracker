@@ -40,6 +40,7 @@
         'drill_on_miss' => $challenge->drill_on_miss?->value ?? DrillMissRule::Restart->value,
         'drill_order' => $challenge->drill_order?->value ?? DrillOrder::Sequential->value,
         'drill_makes_required' => $challenge->drill_makes_required ?? 1,
+        'drill_attempts' => $challenge->drill_attempts ?? 1,
         'drill_rounds' => $challenge->drill_rounds ?? 1,
     ];
 
@@ -205,7 +206,7 @@
                             </template>
                         </select>
                         <input type="number" inputmode="numeric" :name="`steps[${index}][makes_required]`" x-model="step.makes_required" min="1" max="20"
-                               :placeholder="`×${drill_makes_required || 1}`" class="w-14 shrink-0 px-2 {{ $field }}" aria-label="Makes needed">
+                               :placeholder="`×${drill_makes_required || 1}`" class="w-14 shrink-0 px-2 {{ $field }}" aria-label="Sunk needed">
                         <button type="button" @click="steps.splice(index, 1)" class="px-1 text-slate-600" aria-label="Remove step">✕</button>
                     </div>
                 </template>
@@ -215,7 +216,7 @@
 
             <div class="grid grid-cols-2 gap-2">
                 <div>
-                    <label class="{{ $label }}" for="drill_on_miss">On a miss</label>
+                    <label class="{{ $label }}" for="drill_on_miss">On a failed step</label>
                     <select id="drill_on_miss" name="drill_on_miss" x-model="drill_on_miss" class="mt-1 {{ $input }}">
                         @foreach (DrillMissRule::cases() as $rule)
                             <option value="{{ $rule->value }}">{{ $rule->label() }}</option>
@@ -231,8 +232,14 @@
                     </select>
                 </div>
                 <div>
-                    <label class="{{ $label }}" for="drill_makes_required">Makes per step</label>
-                    <input id="drill_makes_required" type="number" inputmode="numeric" name="drill_makes_required" x-model="drill_makes_required" min="1" max="20" class="mt-1 {{ $input }}">
+                    <label class="{{ $label }}" for="drill_attempts">Attempts per step</label>
+                    <input id="drill_attempts" type="number" inputmode="numeric" name="drill_attempts" x-model="drill_attempts" min="1" max="20" class="mt-1 {{ $input }}">
+                </div>
+                {{-- With one attempt the step is simply sunk or failed; disabled so it posts nothing. --}}
+                <div x-show="drill_attempts > 1">
+                    <label class="{{ $label }}" for="drill_makes_required">Sunk per step</label>
+                    <input id="drill_makes_required" type="number" inputmode="numeric" name="drill_makes_required" x-model="drill_makes_required" min="1" :max="drill_attempts"
+                           :disabled="drill_attempts <= 1" class="mt-1 {{ $input }}">
                 </div>
                 <div>
                     <label class="{{ $label }}" for="drill_rounds">Rounds</label>

@@ -22,6 +22,7 @@ class ChallengeFactory extends Factory
             'starts_on' => Carbon::today(),
             'ends_on' => Carbon::today()->addDays(27),
             'drill_makes_required' => 1,
+            'drill_attempts' => 1,
             'drill_rounds' => 1,
         ];
     }

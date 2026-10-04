@@ -3,14 +3,15 @@
 namespace App\Enums;
 
 /**
- * What a miss does to your place in a drill.
+ * What failing a step — missing more than its attempts allow — does to your
+ * place in a drill. With one attempt per step, that is any miss.
  */
 enum DrillMissRule: string
 {
-    /** The classic ladder: any miss sends you back to the first step. */
+    /** The classic ladder: a failed step sends you back to the first step. */
     case Restart = 'restart';
 
-    /** Stay on the current step until you make it. */
+    /** Stay on the current step and go again until you clear it. */
     case Stay = 'stay';
 
     /** Drop back one step. */

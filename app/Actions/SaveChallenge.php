@@ -36,6 +36,7 @@ class SaveChallenge
                 'drill_on_miss' => $drill ? $data['drill_on_miss'] : null,
                 'drill_order' => $drill ? $data['drill_order'] : null,
                 'drill_makes_required' => $data['drill_makes_required'] ?? 1,
+                'drill_attempts' => $data['drill_attempts'] ?? 1,
                 'drill_rounds' => $data['drill_rounds'] ?? 1,
             ];
 
