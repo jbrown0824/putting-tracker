@@ -9,7 +9,8 @@ export function startDrill(drill) {
     return pickPending(drill, {
         round: 0,
         step: 0,
-        streak: 0,
+        stepPutts: 0,
+        stepSunk: 0,
         cleared: [],
         attempts: 0,
         completed: false,
@@ -17,8 +18,15 @@ export function startDrill(drill) {
     });
 }
 
-export function makesRequired(drill, index) {
+export function sunkRequired(drill, index) {
     return Math.max(1, Number(drill.steps[index]?.makes_required ?? drill.makes_required ?? 1));
+}
+
+/**
+ * Putts allowed at a step: never fewer than it needs sunk.
+ */
+export function attemptsAllowed(drill, index) {
+    return Math.max(sunkRequired(drill, index), Number(drill.attempts ?? 1));
 }
 
 /**
@@ -54,16 +62,17 @@ export function applyShot(drill, previous, made) {
         return state;
     }
 
+    // A run saved before steps had attempts kept a streak of makes instead.
     state.attempts++;
+    state.stepPutts = (state.stepPutts ?? state.streak ?? 0) + 1;
+    state.stepSunk = (state.stepSunk ?? state.streak ?? 0) + (made ? 1 : 0);
+    delete state.streak;
 
-    if (made) {
-        state.streak++;
+    const required = sunkRequired(drill, step);
 
-        if (state.streak < makesRequired(drill, step)) {
-            return state;
-        }
-
-        state.streak = 0;
+    if (state.stepSunk >= required) {
+        state.stepPutts = 0;
+        state.stepSunk = 0;
         state.cleared.push(step);
         state.step = step + 1;
 
@@ -79,7 +88,13 @@ export function applyShot(drill, previous, made) {
         return pickPending(drill, { ...state, pending: null });
     }
 
-    state.streak = 0;
+    // Still enough putts left at this step to sink the rest.
+    if (state.stepPutts - state.stepSunk <= attemptsAllowed(drill, step) - required) {
+        return state;
+    }
+
+    state.stepPutts = 0;
+    state.stepSunk = 0;
 
     if ((drill.on_miss ?? 'restart') === 'restart') {
         state.cleared = [];

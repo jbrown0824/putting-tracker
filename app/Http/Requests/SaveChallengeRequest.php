@@ -60,6 +60,7 @@ class SaveChallengeRequest extends FormRequest
             'steps.*.makes_required' => ['nullable', 'integer', 'min:1', 'max:20'],
             'drill_on_miss' => [$drill ? 'required' : 'nullable', Rule::enum(DrillMissRule::class)],
             'drill_order' => [$drill ? 'required' : 'nullable', Rule::enum(DrillOrder::class)],
+            'drill_attempts' => ['nullable', 'integer', 'min:1', 'max:20'],
             'drill_makes_required' => ['nullable', 'integer', 'min:1', 'max:20'],
             'drill_rounds' => ['nullable', 'integer', 'min:1', 'max:20'],
         ];
@@ -81,6 +82,11 @@ class SaveChallengeRequest extends FormRequest
                         && (int) $goal['max_distance_ft'] < (int) $goal['min_distance_ft']) {
                         $validator->errors()->add("goals.{$index}.max_distance_ft", 'The longest distance must be at least the shortest.');
                     }
+                }
+
+                if ($this->input('kind') === ChallengeKind::Drill->value
+                    && (int) ($this->input('drill_makes_required') ?? 1) > (int) ($this->input('drill_attempts') ?? 1)) {
+                    $validator->errors()->add('drill_makes_required', 'A step cannot need more sunk than it has attempts.');
                 }
             },
         ];

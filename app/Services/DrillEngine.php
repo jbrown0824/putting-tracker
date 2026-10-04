@@ -16,9 +16,12 @@ use App\Models\ChallengeStep;
  * congratulate a run the server does not count.
  *
  * The rules:
- * - Each step needs makes_required makes in a row. A miss resets that count.
- * - A miss then applies the drill's miss rule: back to the first step (the
- *   classic ladder), down one step, or stay put.
+ * - Each step gives drill_attempts putts, of which makes_required must be sunk
+ *   (2 attempts, 1 sunk is two tries per rung; 2 and 2 is two in a row). The
+ *   step clears the moment enough are sunk.
+ * - Once too many have missed for the rest to be enough, the step is failed: its
+ *   count resets and the drill's miss rule applies — back to the first step (the
+ *   classic ladder), down one step, or stay put and go again.
  * - Sequential drills walk the steps in order; random drills take whichever step
  *   the phone chose, recorded on each putt.
  * - Clearing every step finishes a round; clearing drill_rounds rounds finishes
@@ -28,7 +31,7 @@ class DrillEngine
 {
     /**
      * @param  array<int, array{made: bool, step: int|null}>  $putts  in the order they were hit
-     * @return array{completed: bool, completed_at_index: int|null, round: int, step: int|null, streak: int, cleared: array<int, int>, attempts: int, furthest_step: int}
+     * @return array{completed: bool, completed_at_index: int|null, round: int, step: int|null, step_putts: int, step_sunk: int, cleared: array<int, int>, attempts: int, furthest_step: int}
      */
     public function replay(Challenge $challenge, array $putts): array
     {
@@ -51,7 +54,7 @@ class DrillEngine
     }
 
     /**
-     * @return array{completed: bool, completed_at_index: int|null, round: int, step: int|null, streak: int, cleared: array<int, int>, attempts: int, furthest_step: int}
+     * @return array{completed: bool, completed_at_index: int|null, round: int, step: int|null, step_putts: int, step_sunk: int, cleared: array<int, int>, attempts: int, furthest_step: int}
      */
     private function start(): array
     {
@@ -61,7 +64,9 @@ class DrillEngine
             'round' => 0,
             // The step the player should be on for a sequential drill.
             'step' => 0,
-            'streak' => 0,
+            // Putts hit, and sunk, at the step being worked on.
+            'step_putts' => 0,
+            'step_sunk' => 0,
             // Steps cleared this round, by index.
             'cleared' => [],
             'attempts' => 0,
@@ -94,16 +99,16 @@ class DrillEngine
         }
 
         $state['attempts']++;
+        $state['step_putts']++;
+        $required = $challenge->sunkRequiredFor($steps[$step]);
 
         if ($made) {
-            $state['streak']++;
-            $required = max(1, $steps[$step]->makes_required ?? $challenge->drill_makes_required);
+            $state['step_sunk']++;
+        }
 
-            if ($state['streak'] < $required) {
-                return $state;
-            }
-
-            $state['streak'] = 0;
+        if ($state['step_sunk'] >= $required) {
+            $state['step_putts'] = 0;
+            $state['step_sunk'] = 0;
             $state['cleared'][] = $step;
             $state['furthest_step'] = max($state['furthest_step'], count($state['cleared']));
             $state['step'] = $step + 1;
@@ -121,7 +126,15 @@ class DrillEngine
             return $state;
         }
 
-        $state['streak'] = 0;
+        $missed = $state['step_putts'] - $state['step_sunk'];
+
+        // Still enough putts left at this step to sink the rest.
+        if ($missed <= $challenge->attemptsFor($steps[$step]) - $required) {
+            return $state;
+        }
+
+        $state['step_putts'] = 0;
+        $state['step_sunk'] = 0;
 
         return match ($challenge->drill_on_miss ?? DrillMissRule::Restart) {
             DrillMissRule::Restart => [...$state, 'cleared' => [], 'step' => 0],

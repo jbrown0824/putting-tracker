@@ -72,6 +72,50 @@ it('lets one rung demand more makes than the rest', function () {
         ->and(replay($drill->fresh('steps'), [true, true, true, true])['completed'])->toBeTrue();
 });
 
+it('gives two tries per rung with two attempts and one sunk', function () {
+    $drill = ladder([3, 4], ['drill_attempts' => 2, 'drill_makes_required' => 1]);
+
+    // A miss then a make clears the rung; a make first clears it straight away.
+    $state = replay($drill, [false, true, true]);
+
+    expect($state['completed'])->toBeTrue()
+        ->and($state['attempts'])->toBe(3);
+});
+
+it('fails the rung once both tries are missed', function () {
+    $drill = ladder([3, 4, 5], ['drill_attempts' => 2, 'drill_makes_required' => 1]);
+
+    $state = replay($drill, [true, false, false]);
+
+    expect($state['step'])->toBe(0)
+        ->and($state['cleared'])->toBe([])
+        ->and($state['step_putts'])->toBe(0);
+});
+
+it('needs every putt sunk when attempts equal the sunk required', function () {
+    $drill = ladder([3, 4], ['drill_attempts' => 2, 'drill_makes_required' => 2]);
+
+    // Sinking one of two on the second rung fails it and, on a classic ladder, restarts.
+    expect(replay($drill, [true, true, true, false])['step'])->toBe(0)
+        ->and(replay($drill, [true, true, true, true])['completed'])->toBeTrue();
+});
+
+it('fails the rung as soon as the remaining attempts cannot be enough', function () {
+    $drill = ladder([3, 4], ['drill_attempts' => 3, 'drill_makes_required' => 2]);
+
+    // Two misses out of three leave too few tries, so the third is never needed.
+    expect(replay($drill, [false, false])['step_putts'])->toBe(0)
+        ->and(replay($drill, [false, true, true, true, true])['completed'])->toBeTrue();
+});
+
+it('lets a rung that needs more sunk than the drill allows attempts take that many', function () {
+    $drill = ladder([3, 4], ['drill_attempts' => 2, 'drill_makes_required' => 1]);
+    $drill->steps[1]->update(['makes_required' => 3]);
+
+    expect(replay($drill->fresh('steps'), [true, true, true, false])['step'])->toBe(0)
+        ->and(replay($drill->fresh('steps'), [true, true, true, true])['completed'])->toBeTrue();
+});
+
 it('drops one rung on a miss when told to', function () {
     $state = replay(ladder([3, 4, 5], ['drill_on_miss' => DrillMissRule::StepBack]), [true, true, false]);
 
